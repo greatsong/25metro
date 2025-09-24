@@ -2,14 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# 데이터 로딩 및 전처리 함수 (app.py와 동일한 함수)
+# 데이터 로딩 및 전처리 함수 (오류 수정됨)
 @st.cache_data
 def load_data():
     try:
         df = pd.read_csv('지하철데이터.csv', encoding='cp949')
+    except UnicodeDecodeError:
+        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig')
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None
+        
     df = df.iloc[:, :-1]
     col_names = ['사용월', '호선명', '역ID', '지하철역']
     for i in range(4, len(df.columns), 2):
@@ -17,12 +20,14 @@ def load_data():
         col_names.append(f'{time_str}_승차')
         col_names.append(f'{time_str}_하차')
     df.columns = col_names
+
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
         if df[col].dtype == 'object':
-            df[col] = df[col].str.replace(',', '').astype(int)
+            df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         else:
-            df[col] = df[col].astype(int)
+            df[col] = df[col].fillna(0).astype(int)
+
     id_vars = ['사용월', '호선명', '역ID', '지하철역']
     df_long = df.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
     df_long['시간대'] = df_long['시간구분'].str.split('_').str[0]
