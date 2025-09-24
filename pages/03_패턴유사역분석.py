@@ -14,6 +14,8 @@ def load_data():
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None, None, None
+    
+    df.dropna(subset=['호선명', '지하철역'], inplace=True)
         
     df = df.iloc[:, :-1]
     col_names = ['사용월', '호선명', '역ID', '지하철역']
