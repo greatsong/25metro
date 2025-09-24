@@ -3,15 +3,14 @@ import pandas as pd
 import plotly.graph_objects as go
 from sklearn.metrics.pairwise import cosine_similarity
 
-# 데이터 로딩 및 전처리 함수 (app.py와 동일한 함수)
+# 데이터 로딩 및 전처리 함수 (오류 수정됨)
 @st.cache_data
 def load_data():
+    dtype_spec = {'호선명': str, '지하철역': str}
     try:
-        # cp949 인코딩으로 먼저 시도
-        df = pd.read_csv('지하철데이터.csv', encoding='cp949')
+        df = pd.read_csv('지하철데이터.csv', encoding='cp949', dtype=dtype_spec)
     except UnicodeDecodeError:
-        # 실패 시 utf-8-sig 인코딩으로 재시도 (BOM 문제 해결)
-        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig')
+        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig', dtype=dtype_spec)
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None, None, None
@@ -25,12 +24,9 @@ def load_data():
     df.columns = col_names
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
-        # 데이터 타입을 숫자로 변환하는 과정의 안정성 강화
         if df[col].dtype == 'object':
-            # 문자열 타입일 경우, 쉼표 제거 -> 숫자로 변환 (오류 발생 시 NaN 처리) -> NaN을 0으로 채우기 -> 정수형으로 변환
             df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         else:
-            # 이미 숫자형 타입일 경우, NaN 값만 0으로 채우고 정수형으로 변환
             df[col] = df[col].fillna(0).astype(int)
 
     id_vars = ['사용월', '호선명', '역ID', '지하철역']
@@ -51,7 +47,7 @@ df_long, df_wide, df_pattern_normalized = load_data()
 st.title("🤝 패턴 유사역 분석")
 st.markdown("특정 역과 시간대별 승하차 패턴이 가장 비슷한 역 3곳을 찾아 비교합니다.")
 
-if df_pattern_normalized is not None:
+if df_pattern_normalized is not None and not df_pattern_normalized.empty:
     # 역 선택
     station_list = sorted(df_pattern_normalized.index.to_list(), key=lambda x: x[1])
     selected_station = st.selectbox(
