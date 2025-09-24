@@ -17,9 +17,12 @@ def load_data():
     지하철 데이터를 불러오고 기본 전처리를 수행하는 함수.
     결과는 캐시되어 페이지 이동 시에도 데이터를 다시 불러오지 않습니다.
     """
-    # 데이터 불러오기
     try:
-        df = pd.read_csv('지하철데이터.csv', encoding='utf8')
+        # cp949 인코딩으로 먼저 시도
+        df = pd.read_csv('지하철데이터.csv', encoding='cp949')
+    except UnicodeDecodeError:
+        # 실패 시 utf-8-sig 인코딩으로 재시도 (BOM 문제 해결)
+        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig')
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None, None, None
@@ -35,13 +38,13 @@ def load_data():
         col_names.append(f'{time_str}_하차')
     df.columns = col_names
 
-    # 승하차 인원 데이터에서 쉼표(,) 제거 및 숫자형으로 변환
+    # 승하차 인원 데이터에서 쉼표(,) 제거 및 숫자형으로 변환 (안정성 강화)
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
         if df[col].dtype == 'object':
-            df[col] = df[col].str.replace(',', '').astype(int)
+            df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         else:
-            df[col] = df[col].astype(int)
+            df[col] = df[col].fillna(0).astype(int)
 
     # Wide to Long 포맷으로 데이터 구조 변경
     id_vars = ['사용월', '호선명', '역ID', '지하철역']
@@ -99,7 +102,6 @@ if df_long is not None:
     st.dataframe(df_wide.head())
 
     # 데이터 다운로드 버튼 추가
-    # 데이터프레임을 CSV로 변환하는 함수 (캐싱 사용)
     @st.cache_data
     def convert_df_to_csv(df):
         return df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
