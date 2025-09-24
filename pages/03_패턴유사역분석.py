@@ -25,10 +25,14 @@ def load_data():
     df.columns = col_names
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
+        # 데이터 타입을 숫자로 변환하는 과정의 안정성 강화
         if df[col].dtype == 'object':
-            df[col] = df[col].str.replace(',', '').astype(int)
+            # 문자열 타입일 경우, 쉼표 제거 -> 숫자로 변환 (오류 발생 시 NaN 처리) -> NaN을 0으로 채우기 -> 정수형으로 변환
+            df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         else:
-            df[col] = df[col].astype(int)
+            # 이미 숫자형 타입일 경우, NaN 값만 0으로 채우고 정수형으로 변환
+            df[col] = df[col].fillna(0).astype(int)
+
     id_vars = ['사용월', '호선명', '역ID', '지하철역']
     df_long = df.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
     df_long['시간대'] = df_long['시간구분'].str.split('_').str[0]
