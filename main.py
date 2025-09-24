@@ -19,7 +19,7 @@ def load_data():
     """
     # 데이터 불러오기
     try:
-        df = pd.read_csv('지하철데이터.csv', encoding='cp949')
+        df = pd.read_csv('지하철데이터.csv', encoding='utf8')
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None, None, None
