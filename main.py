@@ -17,15 +17,20 @@ def load_data():
     지하철 데이터를 불러오고 기본 전처리를 수행하는 함수.
     결과는 캐시되어 페이지 이동 시에도 데이터를 다시 불러오지 않습니다.
     """
+    # 데이터 타입을 지정하여 불러오기 (TypeError 방지)
+    dtype_spec = {'호선명': str, '지하철역': str}
     try:
         # cp949 인코딩으로 먼저 시도
-        df = pd.read_csv('지하철데이터.csv', encoding='cp949')
+        df = pd.read_csv('지하철데이터.csv', encoding='cp949', dtype=dtype_spec)
     except UnicodeDecodeError:
         # 실패 시 utf-8-sig 인코딩으로 재시도 (BOM 문제 해결)
-        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig')
+        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig', dtype=dtype_spec)
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None, None, None
+
+    # '호선명' 또는 '지하철역'이 비어있는 행 제거 (오류 방지)
+    df.dropna(subset=['호선명', '지하철역'], inplace=True)
 
     # 불필요한 마지막 '등록일자' 열 제거
     df = df.iloc[:, :-1]
