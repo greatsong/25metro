@@ -5,13 +5,16 @@ import plotly.express as px
 # 데이터 로딩 및 전처리 함수 (오류 수정됨)
 @st.cache_data
 def load_data():
+    dtype_spec = {'호선명': str, '지하철역': str}
     try:
-        df = pd.read_csv('지하철데이터.csv', encoding='cp949')
+        df = pd.read_csv('지하철데이터.csv', encoding='cp949', dtype=dtype_spec)
     except UnicodeDecodeError:
-        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig')
+        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig', dtype=dtype_spec)
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None
+    
+    df.dropna(subset=['호선명', '지하철역'], inplace=True)
         
     df = df.iloc[:, :-1]
     col_names = ['사용월', '호선명', '역ID', '지하철역']
