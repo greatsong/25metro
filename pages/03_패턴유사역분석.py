@@ -7,10 +7,15 @@ from sklearn.metrics.pairwise import cosine_similarity
 @st.cache_data
 def load_data():
     try:
+        # cp949 인코딩으로 먼저 시도
         df = pd.read_csv('지하철데이터.csv', encoding='cp949')
+    except UnicodeDecodeError:
+        # 실패 시 utf-8-sig 인코딩으로 재시도 (BOM 문제 해결)
+        df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig')
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
         return None, None, None
+        
     df = df.iloc[:, :-1]
     col_names = ['사용월', '호선명', '역ID', '지하철역']
     for i in range(4, len(df.columns), 2):
