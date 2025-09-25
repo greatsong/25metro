@@ -76,58 +76,72 @@ if df_long is not None:
         top_stations_by_time_individual = df_long.loc[df_long.groupby(['시간대', '구분'])['인원수'].idxmax()]
         top_stations_by_time_individual['역명(호선)'] = top_stations_by_time_individual['지하철역'] + "(" + top_stations_by_time_individual['호선명'] + ")"
 
-    # --- FIX: 시간 순서를 올바르게 정의 ---
+    # 시간 순서를 올바르게 정의
     time_slots = [f"{h:02d}" for h in range(4, 24)] + ["00", "01"]
 
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("🔼 시간대별 최다 승차역")
-        data_ride = top_stations_by_time_combined if combine_stations else top_stations_by_time_individual
+        data_ride = (top_stations_by_time_combined if combine_stations else top_stations_by_time_individual).copy()
         data_ride = data_ride[data_ride['구분'] == '승차']
 
+        # --- FIX: 데이터 자체에 시간 순서를 명확하게 정의 ---
+        data_ride['시간대'] = pd.Categorical(data_ride['시간대'], categories=time_slots, ordered=True)
+        data_ride = data_ride.sort_values('시간대')
+
         if show_line_contribution:
-            plot_data_ride = plot_data_stacked[plot_data_stacked['구분'] == '승차']
+            plot_data_ride = plot_data_stacked[plot_data_stacked['구분'] == '승차'].copy()
+            plot_data_ride['시간대'] = pd.Categorical(plot_data_ride['시간대'], categories=time_slots, ordered=True)
+            plot_data_ride = plot_data_ride.sort_values('시간대')
+            
             fig_ride = px.bar(
                 plot_data_ride, x='시간대', y='인원수', color='호선명', text='지하철역',
-                category_orders={"시간대": time_slots}, title='시간대별 최다 승차역 (호선별 구성)'
+                title='시간대별 최다 승차역 (호선별 구성)'
             )
             fig_ride.update_traces(textposition='outside')
         elif chart_type == '막대 그래프':
             fig_ride = px.bar(
                 data_ride, x='시간대', y='인원수', color='역명(호선)', text='지하철역',
-                category_orders={"시간대": time_slots}, title='시간대별 최다 승차역'
+                title='시간대별 최다 승차역'
             )
             fig_ride.update_traces(textposition='outside')
         else: # 꺾은선 그래프
             fig_ride = px.line(
                 data_ride, x='시간대', y='인원수', markers=True, text='역명(호선)', color='역명(호선)',
-                category_orders={"시간대": time_slots}, title='시간대별 최다 승차역'
+                title='시간대별 최다 승차역'
             )
             fig_ride.update_traces(textposition='top center', textfont_size=10)
         st.plotly_chart(fig_ride, use_container_width=True)
 
     with col2:
         st.subheader("🔽 시간대별 최다 하차역")
-        data_alight = top_stations_by_time_combined if combine_stations else top_stations_by_time_individual
+        data_alight = (top_stations_by_time_combined if combine_stations else top_stations_by_time_individual).copy()
         data_alight = data_alight[data_alight['구분'] == '하차']
 
+        # --- FIX: 데이터 자체에 시간 순서를 명확하게 정의 ---
+        data_alight['시간대'] = pd.Categorical(data_alight['시간대'], categories=time_slots, ordered=True)
+        data_alight = data_alight.sort_values('시간대')
+
         if show_line_contribution:
-            plot_data_alight = plot_data_stacked[plot_data_stacked['구분'] == '하차']
+            plot_data_alight = plot_data_stacked[plot_data_stacked['구분'] == '하차'].copy()
+            plot_data_alight['시간대'] = pd.Categorical(plot_data_alight['시간대'], categories=time_slots, ordered=True)
+            plot_data_alight = plot_data_alight.sort_values('시간대')
+
             fig_alight = px.bar(
                 plot_data_alight, x='시간대', y='인원수', color='호선명', text='지하철역',
-                category_orders={"시간대": time_slots}, title='시간대별 최다 하차역 (호선별 구성)'
+                title='시간대별 최다 하차역 (호선별 구성)'
             )
             fig_alight.update_traces(textposition='outside')
         elif chart_type == '막대 그래프':
             fig_alight = px.bar(
                 data_alight, x='시간대', y='인원수', color='역명(호선)', text='지하철역',
-                category_orders={"시간대": time_slots}, title='시간대별 최다 하차역'
+                title='시간대별 최다 하차역'
             )
             fig_alight.update_traces(textposition='outside')
         else: # 꺾은선 그래프
             fig_alight = px.line(
                 data_alight, x='시간대', y='인원수', markers=True, text='역명(호선)', color='역명(호선)',
-                category_orders={"시간대": time_slots}, title='시간대별 최다 하차역'
+                title='시간대별 최다 하차역'
             )
             fig_alight.update_traces(textposition='top center', textfont_size=10)
         st.plotly_chart(fig_alight, use_container_width=True)
