@@ -42,7 +42,7 @@ def load_and_prep_data():
     df_long = df_long.drop(columns=['시간구분'])
     return df_long
 
-# --- FIX: 모든 무거운 계산을 하나의 캐시 함수로 통합 ---
+# 모든 무거운 계산을 하나의 캐시 함수로 통합
 @st.cache_data
 def get_animation_data(df_long, combine_stations, analysis_type, top_n):
     """
@@ -67,11 +67,28 @@ def get_animation_data(df_long, combine_stations, analysis_type, top_n):
 
     grouped['누적인원수'] = grouped.groupby('역명(호선)')['인원수'].cumsum()
     
-    # 애니메이션 데이터 생성 로직
-    top_n_per_slot = grouped.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
-    all_top_stations = top_n_per_slot['역명(호선)'].unique()
+    # --- FIX: 데이터 무결성을 보장하는 새로운 애니메이션 데이터 생성 로직 ---
+    # 1. 데이터를 피벗하여 각 역이 모든 시간대에 대한 데이터를 갖도록 구조 변경
+    pivot_df = grouped.pivot_table(index='시간대', columns='역명(호선)', values='누적인원수')
+
+    # 2. 누적값이므로, 없는 데이터(NaN)는 이전 시간의 값으로 채움 (forward fill)
+    pivot_df.ffill(inplace=True)
+    pivot_df.fillna(0, inplace=True) # 맨 처음 NaN은 0으로 채움
+
+    # 3. 각 시간대별 TOP N에 한 번이라도 들었던 모든 역을 '후보'로 선정
+    all_top_stations = set()
+    for time_index in pivot_df.index:
+        top_stations_at_time = pivot_df.loc[time_index].nlargest(top_n).index
+        all_top_stations.update(top_stations_at_time)
     
-    animation_data = grouped[grouped['역명(호선)'].isin(all_top_stations)]
+    # 4. 후보 역들의 데이터만 필터링하고, 다시 long format으로 변환
+    animation_df_wide = pivot_df[list(all_top_stations)]
+    animation_data = animation_df_wide.melt(
+        ignore_index=False, 
+        var_name='역명(호선)', 
+        value_name='누적인원수'
+    ).reset_index()
+
     return animation_data
 
 # --- 앱 UI 부분 ---
@@ -90,7 +107,6 @@ if df_long is not None:
         help="프레임 전환 속도입니다. 값이 낮을수록 빨라집니다."
     )
 
-    # 모든 데이터 처리를 하나의 캐시 함수로 통합하여 호출
     animation_data = get_animation_data(df_long, combine_stations, analysis_type, top_n)
 
     st.markdown("---")
@@ -108,7 +124,7 @@ if df_long is not None:
         title=f"시간대별 누적 {analysis_type} 인원 TOP {top_n} 레이싱 차트"
     )
 
-    chart_height = top_n * 40 + 150
+    chart_height = len(animation_data['역명(호선)'].unique()) * 35 + 150
 
     fig.update_yaxes(categoryorder="total ascending")
     fig.update_layout(
