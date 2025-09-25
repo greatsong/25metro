@@ -46,8 +46,8 @@ def load_and_prep_data():
     return df_long
 
 # --- 앱 UI 부분 ---
-st.header("🏁 시간대별 유동인구 레이싱 차트")
-st.markdown("시간의 흐름에 따라 각 역의 승하차 인원 순위가 어떻게 변하는지 애니메이션으로 확인합니다. 아침의 승자는 누가 될까요?")
+st.header("🏁 시간대별 누적 유동인구 레이싱 차트")
+st.markdown("시간의 흐름에 따라 각 역의 **누적** 승하차 인원 순위가 어떻게 변하는지 애니메이션으로 확인합니다. 최종 승자는 누가 될까요?")
 
 df_long = load_and_prep_data()
 
@@ -57,9 +57,7 @@ if df_long is not None:
     top_n = st.slider("📊 표시할 순위 (TOP N)", 5, 20, 10)
 
     # 분석 기준에 따라 데이터 필터링
-    if analysis_type == '종합':
-        pass # 전체 데이터 사용
-    else:
+    if analysis_type != '종합':
         df_long = df_long[df_long['구분'] == analysis_type]
 
     # 데이터 집계
@@ -73,45 +71,47 @@ if df_long is not None:
     # 시간 순서 정의 및 데이터 정렬
     time_slots = [f"{h:02d}" for h in range(4, 24)] + ["00", "01"]
     grouped['시간대'] = pd.Categorical(grouped['시간대'], categories=time_slots, ordered=True)
-    grouped = grouped.sort_values('시간대')
+    grouped = grouped.sort_values(['역명(호선)', '시간대'])
 
-    # 각 시간대별 TOP N 필터링
-    animation_data = grouped.groupby('시간대').apply(lambda x: x.nlargest(top_n, '인원수')).reset_index(drop=True)
+    # --- FIX: 누적 인원수 계산 ---
+    grouped['누적인원수'] = grouped.groupby('역명(호선)')['인원수'].cumsum()
+
+    # 각 시간대별 TOP N 필터링 (누적 인원수 기준)
+    animation_data = grouped.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
 
     st.markdown("---")
-    st.info("▶️ 아래 그래프의 재생 버튼을 눌러 시간대별 순위 변화를 확인하세요!")
+    st.info("▶️ 아래 그래프의 재생 버튼을 눌러 시간대별 **누적** 순위 변화를 확인하세요!")
 
     # 애니메이션 바 차트 생성
     fig = px.bar(
         animation_data,
-        x="인원수",
+        x="누적인원수",
         y="역명(호선)",
         orientation='h',
         color="역명(호선)",
         animation_frame="시간대",
         animation_group="역명(호선)",
-        text="인원수",
-        title=f"시간대별 {analysis_type} 인원 TOP {top_n} 레이싱 차트"
+        text="누적인원수",
+        title=f"시간대별 누적 {analysis_type} 인원 TOP {top_n} 레이싱 차트"
     )
 
     # 각 프레임의 y축 순서 및 x축 범위 설정
     fig.update_yaxes(categoryorder="total ascending")
     fig.update_layout(
-        xaxis_title="인원수",
+        xaxis_title="누적 인원수",
         yaxis_title="지하철역",
         showlegend=False,
         height=600,
-        # 애니메이션 속도 조절 (단위: ms)
         updatemenus=[dict(
             type="buttons",
             buttons=[dict(label="Play",
                           method="animate",
-                          args=[None, {"frame": {"duration": 500, "redraw": True}, "fromcurrent": True}])])]
+                          args=[None, {"frame": {"duration": 300, "redraw": True}, "fromcurrent": True}])])]
     )
     
-    # x축 범위를 동적으로 설정하여 막대가 화면 밖으로 나가지 않도록 함
-    max_value = animation_data['인원수'].max()
+    max_value = animation_data['누적인원수'].max()
     fig.update_xaxes(range=[0, max_value * 1.2])
     fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
 
     st.plotly_chart(fig, use_container_width=True)
+
