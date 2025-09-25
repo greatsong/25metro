@@ -119,9 +119,10 @@ if df_clean is not None:
 
     plot_df = df_pattern_normalized.loc[stations_to_plot].T.reset_index()
     
-    # reset_index()는 인덱스 이름이 없을 경우 'index'라는 이름의 열을 생성합니다.
-    # 이를 '시간구분'으로 명시적으로 변경하여 오류를 방지합니다.
-    plot_df.rename(columns={'index': '시간구분'}, inplace=True)
+    # --- FIX: reset_index()로 생성된 첫 번째 열의 이름을 '시간구분'으로 강제 지정 ---
+    # 이 방법은 reset_index()가 어떤 이름의 열을 생성하든 상관없이 안정적으로 작동합니다.
+    time_col_name = plot_df.columns[0]
+    plot_df.rename(columns={time_col_name: '시간구분'}, inplace=True)
 
     if not combine_stations:
         display_names = {col: f"{col[1]} ({col[0]})" for col in plot_df.columns if isinstance(col, tuple)}
