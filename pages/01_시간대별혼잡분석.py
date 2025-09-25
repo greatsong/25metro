@@ -42,15 +42,14 @@ df_long = load_data()
 
 st.header(" busiest subway stations by time of day")
 st.markdown("""
-- **시간, 승하차, TOP N**을 선택하여 해당 시간대에 가장 붐볐던 역을 확인합니다.
+- **시간, TOP N**을 선택하여 해당 시간대에 가장 붐볐던 역의 승차 및 하차 순위를 확인합니다.
 - '동일 역명 데이터 합산'을 체크하면 모든 호선의 이용객을 합산하여 순위를 계산합니다.
 """)
 
 if df_long is not None:
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        ride_alight_option = st.radio("승차/하차", ('승차', '하차'))
-        
+    # --- Sidebar for controls ---
+    with st.sidebar:
+        st.header("⚙️ 컨트롤 패널")
         time_list = sorted(df_long['시간대'].unique())
         start_time, end_time = st.select_slider(
             '시간을 선택하세요.',
@@ -62,42 +61,58 @@ if df_long is not None:
 
         combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 역별 순위를 계산합니다.")
 
-    # 데이터 필터링
-    filtered_df = df_long[
-        (df_long['구분'] == ride_alight_option) &
+    # --- Data processing ---
+    # 승차 데이터 필터링 및 집계
+    filtered_ride = df_long[
+        (df_long['구분'] == '승차') &
+        (df_long['시간대'] >= start_time) &
+        (df_long['시간대'] <= end_time)
+    ]
+    # 하차 데이터 필터링 및 집계
+    filtered_alight = df_long[
+        (df_long['구분'] == '하차') &
         (df_long['시간대'] >= start_time) &
         (df_long['시간대'] <= end_time)
     ]
 
     if combine_stations:
-        # 역명 기준으로 합산
-        station_total = filtered_df.groupby('지하철역')['인원수'].sum().nlargest(top_n)
-        station_total = station_total.reset_index()
-        station_total['역명(호선)'] = station_total['지하철역']
+        # 승차 (합산)
+        station_ride = filtered_ride.groupby('지하철역')['인원수'].sum().nlargest(top_n).reset_index()
+        station_ride['역명(호선)'] = station_ride['지하철역']
+        # 하차 (합산)
+        station_alight = filtered_alight.groupby('지하철역')['인원수'].sum().nlargest(top_n).reset_index()
+        station_alight['역명(호선)'] = station_alight['지하철역']
     else:
-        # 기존 방식 (호선 포함)
-        station_total = filtered_df.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(top_n)
-        station_total = station_total.reset_index()
-        station_total['역명(호선)'] = station_total['지하철역'] + "(" + station_total['호선명'] + ")"
+        # 승차 (개별)
+        station_ride = filtered_ride.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(top_n).reset_index()
+        station_ride['역명(호선)'] = station_ride['지하철역'] + "(" + station_ride['호선명'] + ")"
+        # 하차 (개별)
+        station_alight = filtered_alight.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(top_n).reset_index()
+        station_alight['역명(호선)'] = station_alight['지하철역'] + "(" + station_alight['호선명'] + ")"
         
-    station_total = station_total.sort_values(by='인원수', ascending=True)
+    station_ride = station_ride.sort_values(by='인원수', ascending=True)
+    station_alight = station_alight.sort_values(by='인원수', ascending=True)
+    
+    st.subheader(f'**{start_time}시~{end_time}시** 혼잡도 TOP {top_n} 역')
+    
+    # --- Display graphs in two columns ---
+    col1, col2 = st.columns(2)
+
+    with col1:
+        fig_ride = px.bar(
+            station_ride, x='인원수', y='역명(호선)', orientation='h', text='인원수',
+            title=f"🔼 최다 승차 역"
+        )
+        fig_ride.update_traces(texttemplate='%{text:,.0f}명', textposition='outside')
+        fig_ride.update_layout(yaxis_title='지하철역', xaxis_title='승차 인원수', yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_ride, use_container_width=True)
 
     with col2:
-        title = f'**{start_time}시~{end_time}시** 가장 **{ride_alight_option}** 인원이 많은 역 (TOP {top_n})'
-        st.subheader(title)
-        
-        fig = px.bar(
-            station_total,
-            x='인원수',
-            y='역명(호선)',
-            orientation='h',
-            text='인원수'
+        fig_alight = px.bar(
+            station_alight, x='인원수', y='역명(호선)', orientation='h', text='인원수',
+            title=f"🔽 최다 하차 역"
         )
-        fig.update_traces(texttemplate='%{text:,.0f}명', textposition='outside')
-        fig.update_layout(
-            yaxis_title='지하철역',
-            xaxis_title=f'{ride_alight_option} 인원수',
-            yaxis={'categoryorder':'total ascending'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        fig_alight.update_traces(texttemplate='%{text:,.0f}명', textposition='outside', marker_color='#FFA500')
+        fig_alight.update_layout(yaxis_title='지하철역', xaxis_title='하차 인원수', yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_alight, use_container_width=True)
 
