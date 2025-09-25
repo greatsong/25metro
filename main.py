@@ -77,7 +77,7 @@ with col2:
     with st.container(border=True):
         st.subheader("4. 시간대별 전체순위 분석")
         st.markdown("- **무엇을 하나요?**: 각 시간대의 '챔피언' (가장 이용객이 많은 역)이 어떻게 변하는지 확인합니다.")
-        st.markdown("- **사용 방법**: 막대 또는 꺾은선 그래프를 선택하여 시간의 흐름에 따른 1위 역의 변화를 탐색할 수 있습니다.")
+        st.markdown("- **사용 방법**: 막대그래프로 시간의 흐름에 따른 1위 역의 변화를 탐색할 수 있습니다.")
 
 with col3:
     with st.container(border=True):
