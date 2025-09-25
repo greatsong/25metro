@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# 데이터 로딩 및 전처리 함수
+# 데이터 로딩 및 기본 전처리 함수
 @st.cache_data
 def load_and_prep_data():
     """
-    데이터를 로드하고 모든 전처리를 수행하여 분석에 바로 사용할 수 있는
-    깨끗한 '와이드' 포맷의 데이터프레임을 반환합니다.
+    CSV 파일을 로드하고 기본적인 전처리(컬럼명 변경, 타입 변환, long format 변환)를 수행합니다.
+    이 함수는 앱 세션 동안 한 번만 실행됩니다.
     """
     dtype_spec = {'호선명': str, '지하철역': str}
     try:
@@ -19,9 +19,8 @@ def load_and_prep_data():
         return None
     
     df.dropna(subset=['호선명', '지하철역'], inplace=True)
-    df = df.iloc[:, :-1].copy() # 불필요한 마지막 열 제거 및 복사본 생성
+    df = df.iloc[:, :-1].copy()
     
-    # 컬럼 이름 재정의
     col_names = ['사용월', '호선명', '역ID', '지하철역']
     for i in range(4, len(df.columns), 2):
         time_str = df.columns[i].split('~')[0][:2]
@@ -29,7 +28,6 @@ def load_and_prep_data():
         col_names.append(f'{time_str}_하차')
     df.columns = col_names
     
-    # 인원수 데이터 숫자형으로 변환
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
         if df[col].dtype == 'object':
@@ -37,13 +35,38 @@ def load_and_prep_data():
         else:
             df[col] = df[col].fillna(0).astype(int)
             
-    # Long format으로 변환
     id_vars = ['사용월', '호선명', '역ID', '지하철역']
     df_long = df.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
     df_long['시간대'] = df_long['시간구분'].str.split('_').str[0]
     df_long['구분'] = df_long['시간구분'].str.split('_').str[1]
     df_long = df_long.drop(columns=['시간구분'])
     return df_long
+
+# --- FIX: 무거운 계산을 위한 별도의 캐시 함수 ---
+@st.cache_data
+def get_cumulative_data(df_long, combine_stations, analysis_type):
+    """
+    선택된 옵션에 따라 데이터를 그룹화하고 누적 합계를 계산합니다.
+    이 함수는 옵션이 변경될 때만 재실행됩니다.
+    """
+    if analysis_type != '종합':
+        df_filtered = df_long[df_long['구분'] == analysis_type]
+    else:
+        df_filtered = df_long
+
+    if combine_stations:
+        grouped = df_filtered.groupby(['시간대', '지하철역'])['인원수'].sum().reset_index()
+        grouped['역명(호선)'] = grouped['지하철역']
+    else:
+        grouped = df_filtered.groupby(['시간대', '호선명', '지하철역'])['인원수'].sum().reset_index()
+        grouped['역명(호선)'] = grouped['지하철역'] + "(" + grouped['호선명'] + ")"
+
+    time_slots = [f"{h:02d}" for h in range(4, 24)] + ["00", "01"]
+    grouped['시간대'] = pd.Categorical(grouped['시간대'], categories=time_slots, ordered=True)
+    grouped = grouped.sort_values(['역명(호선)', '시간대'])
+
+    grouped['누적인원수'] = grouped.groupby('역명(호선)')['인원수'].cumsum()
+    return grouped
 
 # --- 앱 UI 부분 ---
 st.header("🏁 시간대별 누적 유동인구 레이싱 차트")
@@ -55,41 +78,21 @@ if df_long is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 환승역 데이터를 합산하여 분석합니다.")
     analysis_type = st.radio("📈 분석 기준 선택", ('종합', '승차', '하차'), horizontal=True)
     top_n = st.slider("📊 표시할 순위 (TOP N)", 5, 20, 10)
-    
-    # --- NEW: 애니메이션 속도 조절 슬라이더 추가 ---
     animation_speed = st.slider(
         "💨 애니메이션 속도 조절 (ms)",
         min_value=100, max_value=1000, value=300, step=50,
         help="프레임 전환 속도입니다. 값이 낮을수록 빨라집니다."
     )
 
-    # 분석 기준에 따라 데이터 필터링
-    if analysis_type != '종합':
-        df_long = df_long[df_long['구분'] == analysis_type]
+    # 무거운 계산은 캐시된 함수를 통해 수행
+    cumulative_data = get_cumulative_data(df_long, combine_stations, analysis_type)
 
-    # 데이터 집계
-    if combine_stations:
-        grouped = df_long.groupby(['시간대', '지하철역'])['인원수'].sum().reset_index()
-        grouped['역명(호선)'] = grouped['지하철역']
-    else:
-        grouped = df_long.groupby(['시간대', '호선명', '지하철역'])['인원수'].sum().reset_index()
-        grouped['역명(호선)'] = grouped['지하철역'] + "(" + grouped['호선명'] + ")"
-
-    # 시간 순서 정의 및 데이터 정렬
-    time_slots = [f"{h:02d}" for h in range(4, 24)] + ["00", "01"]
-    grouped['시간대'] = pd.Categorical(grouped['시간대'], categories=time_slots, ordered=True)
-    grouped = grouped.sort_values(['역명(호선)', '시간대'])
-
-    # 누적 인원수 계산
-    grouped['누적인원수'] = grouped.groupby('역명(호선)')['인원수'].cumsum()
-
-    # 각 시간대별 TOP N 필터링 (누적 인원수 기준)
-    animation_data = grouped.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
+    # 가벼운 TOP N 필터링만 매번 수행
+    animation_data = cumulative_data.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
 
     st.markdown("---")
     st.info("▶️ 아래 그래프의 재생 버튼을 눌러 시간대별 **누적** 순위 변화를 확인하세요!")
 
-    # 애니메이션 바 차트 생성
     fig = px.bar(
         animation_data,
         x="누적인원수",
@@ -102,7 +105,6 @@ if df_long is not None:
         title=f"시간대별 누적 {analysis_type} 인원 TOP {top_n} 레이싱 차트"
     )
 
-    # 각 프레임의 y축 순서 및 x축 범위 설정
     fig.update_yaxes(categoryorder="total ascending")
     fig.update_layout(
         xaxis_title="누적 인원수",
@@ -111,9 +113,8 @@ if df_long is not None:
         height=600,
     )
     
-    # --- FIX: 슬라이더 값으로 애니메이션 속도 조절 ---
     fig.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = animation_speed
-    fig.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = int(animation_speed * 0.3) # 전환 효과는 더 빠르게
+    fig.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = int(animation_speed * 0.3)
     
     max_value = animation_data['누적인원수'].max()
     fig.update_xaxes(range=[0, max_value * 1.2])
