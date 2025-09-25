@@ -73,7 +73,7 @@ if df_long is not None:
     grouped['시간대'] = pd.Categorical(grouped['시간대'], categories=time_slots, ordered=True)
     grouped = grouped.sort_values(['역명(호선)', '시간대'])
 
-    # --- FIX: 누적 인원수 계산 ---
+    # 누적 인원수 계산
     grouped['누적인원수'] = grouped.groupby('역명(호선)')['인원수'].cumsum()
 
     # 각 시간대별 TOP N 필터링 (누적 인원수 기준)
@@ -102,12 +102,13 @@ if df_long is not None:
         yaxis_title="지하철역",
         showlegend=False,
         height=600,
-        updatemenus=[dict(
-            type="buttons",
-            buttons=[dict(label="Play",
-                          method="animate",
-                          args=[None, {"frame": {"duration": 300, "redraw": True}, "fromcurrent": True}])])]
+        # --- FIX: 중복되는 커스텀 Play 버튼 제거 ---
+        # Plotly 기본 컨트롤러 사용
     )
+    
+    # 애니메이션 속도 조절
+    fig.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = 300
+    fig.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = 100
     
     max_value = animation_data['누적인원수'].max()
     fig.update_xaxes(range=[0, max_value * 1.2])
