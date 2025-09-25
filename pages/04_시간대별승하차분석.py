@@ -60,22 +60,7 @@ if df_long is not None:
         "🔁 동일 역명 데이터 합산하여 보기",
         help="체크 시, '서울역(1호선)', '서울역(4호선)' 등을 '서울역 (통합)'으로 합산하여 분석합니다."
     )
-
-    if combine_stations:
-        # 합산 로직: 역명 기준으로 인원수 합산 후 1위 찾기
-        grouped_df = df_long.groupby(['시간대', '구분', '지하철역'])['인원수'].sum().reset_index()
-        top_stations_by_time = grouped_df.loc[grouped_df.groupby(['시간대', '구분'])['인원수'].idxmax()]
-        top_stations_by_time['역명(호선)'] = top_stations_by_time['지하철역'] + " (통합)"
-    else:
-        # 기존 로직: 개별 호선 기준 1위 찾기
-        top_stations_by_time = df_long.loc[df_long.groupby(['시간대', '구분'])['인원수'].idxmax()]
-        top_stations_by_time['역명(호선)'] = top_stations_by_time['지하철역'] + "(" + top_stations_by_time['호선명'] + ")"
-
-    # 공통 로직
-    top_stations_by_time = top_stations_by_time.sort_values(by='시간대')
-    top_ride = top_stations_by_time[top_stations_by_time['구분'] == '승차']
-    top_alight = top_stations_by_time[top_stations_by_time['구분'] == '하차']
-
+    
     st.markdown("---")
 
     # 그래프 종류 선택
@@ -86,63 +71,86 @@ if df_long is not None:
     )
     
     st.markdown("---")
-    
+
+    # 데이터 준비
+    if combine_stations:
+        # 합산 로직: 역명 기준으로 그룹화하여 최다 이용역 정보 추출
+        grouped_by_name = df_long.groupby(['시간대', '구분', '지하철역'])['인원수'].sum().reset_index()
+        top_station_info = grouped_by_name.loc[grouped_by_name.groupby(['시간대', '구분'])['인원수'].idxmax()]
+        
+        # 스택 막대 그래프를 위한 데이터 준비
+        top_station_filter = top_station_info[['시간대', '구분', '지하철역']]
+        plot_data_stacked = pd.merge(df_long, top_station_filter, on=['시간대', '구분', '지하철역'])
+        plot_data_stacked = plot_data_stacked.sort_values(by=['시간대', '호선명'])
+        
+        # 꺾은선 그래프를 위한 데이터 준비 (합산된 총 인원)
+        top_stations_by_time_combined = top_station_info.copy()
+        top_stations_by_time_combined['역명(호선)'] = top_stations_by_time_combined['지하철역'] + " (통합)"
+        top_stations_by_time_combined = top_stations_by_time_combined.sort_values(by='시간대')
+
+    else:
+        # 기존 로직: 개별 호선 기준 1위 찾기
+        top_stations_by_time_individual = df_long.loc[df_long.groupby(['시간대', '구분'])['인원수'].idxmax()]
+        top_stations_by_time_individual['역명(호선)'] = top_stations_by_time_individual['지하철역'] + "(" + top_stations_by_time_individual['호선명'] + ")"
+        top_stations_by_time_individual = top_stations_by_time_individual.sort_values(by='시간대')
+
     # 두 개의 컬럼으로 나누어 그래프 표시
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("🔼 시간대별 최다 승차역")
-        
-        if chart_type == '막대 그래프':
+        if combine_stations and chart_type == '막대 그래프':
+            # 스택 막대 그래프 (합산 모드)
+            data_to_plot = plot_data_stacked[plot_data_stacked['구분'] == '승차']
             fig_ride = px.bar(
-                top_ride,
-                x='시간대',
-                y='인원수',
-                color='역명(호선)',
-                text='지하철역',
-                labels={'시간대': '시간대', '인원수': '최다 승차 인원수', '역명(호선)': '역 정보'},
-                title='시간대별 최다 승차역'
+                data_to_plot, x='시간대', y='인원수', color='호선명',
+                labels={'시간대': '시간대', '인원수': '최다 승차 인원수', '호선명': '호선'},
+                title='시간대별 최다 승차역 (호선별 구성)',
+                hover_name='지하철역'
             )
-            fig_ride.update_traces(textposition='outside')
-        else: # 꺾은선 그래프
-            fig_ride = px.line(
-                top_ride,
-                x='시간대',
-                y='인원수',
-                markers=True,
-                text='역명(호선)',
-                labels={'시간대': '시간대', '인원수': '최다 승차 인원수'},
-                title='시간대별 최다 승차 인원'
-            )
-            fig_ride.update_traces(textposition='top center', textfont_size=10)
-        
+            st.info("💡 각 막대는 해당 시간대 최다 이용역의 **호선별 인원 구성**을 보여줍니다.")
+        else:
+            # 일반 그래프 (개별 모드 또는 꺾은선 그래프)
+            data_to_plot = top_stations_by_time_combined[top_stations_by_time_combined['구분'] == '승차'] if combine_stations else top_stations_by_time_individual[top_stations_by_time_individual['구분'] == '승차']
+            if chart_type == '막대 그래프':
+                fig_ride = px.bar(
+                    data_to_plot, x='시간대', y='인원수', color='역명(호선)', text='지하철역',
+                    labels={'시간대': '시간대', '인원수': '최다 승차 인원수', '역명(호선)': '역 정보'},
+                    title='시간대별 최다 승차역')
+                fig_ride.update_traces(textposition='outside')
+            else: # 꺾은선 그래프
+                fig_ride = px.line(
+                    data_to_plot, x='시간대', y='인원수', markers=True, text='역명(호선)',
+                    labels={'시간대': '시간대', '인원수': '최다 승차 인원수'},
+                    title='시간대별 최다 승차 인원')
+                fig_ride.update_traces(textposition='top center', textfont_size=10)
         st.plotly_chart(fig_ride, use_container_width=True)
 
     with col2:
         st.subheader("🔽 시간대별 최다 하차역")
-
-        if chart_type == '막대 그래프':
+        if combine_stations and chart_type == '막대 그래프':
+            # 스택 막대 그래프 (합산 모드)
+            data_to_plot = plot_data_stacked[plot_data_stacked['구분'] == '하차']
             fig_alight = px.bar(
-                top_alight,
-                x='시간대',
-                y='인원수',
-                color='역명(호선)',
-                text='지하철역',
-                labels={'시간대': '시간대', '인원수': '최다 하차 인원수', '역명(호선)': '역 정보'},
-                title='시간대별 최다 하차역'
+                data_to_plot, x='시간대', y='인원수', color='호선명',
+                labels={'시간대': '시간대', '인원수': '최다 하차 인원수', '호선명': '호선'},
+                title='시간대별 최다 하차역 (호선별 구성)',
+                hover_name='지하철역'
             )
-            fig_alight.update_traces(textposition='outside')
-        else: # 꺾은선 그래프
-            fig_alight = px.line(
-                top_alight,
-                x='시간대',
-                y='인원수',
-                markers=True,
-                text='역명(호선)',
-                labels={'시간대': '시간대', '인원수': '최다 하차 인원수'},
-                title='시간대별 최다 하차 인원'
-            )
-            fig_alight.update_traces(textposition='top center', textfont_size=10)
-            
+        else:
+            # 일반 그래프 (개별 모드 또는 꺾은선 그래프)
+            data_to_plot = top_stations_by_time_combined[top_stations_by_time_combined['구분'] == '하차'] if combine_stations else top_stations_by_time_individual[top_stations_by_time_individual['구분'] == '하차']
+            if chart_type == '막대 그래프':
+                fig_alight = px.bar(
+                    data_to_plot, x='시간대', y='인원수', color='역명(호선)', text='지하철역',
+                    labels={'시간대': '시간대', '인원수': '최다 하차 인원수', '역명(호선)': '역 정보'},
+                    title='시간대별 최다 하차역')
+                fig_alight.update_traces(textposition='outside')
+            else: # 꺾은선 그래프
+                fig_alight = px.line(
+                    data_to_plot, x='시간대', y='인원수', markers=True, text='역명(호선)',
+                    labels={'시간대': '시간대', '인원수': '최다 하차 인원수'},
+                    title='시간대별 최다 하차 인원')
+                fig_alight.update_traces(textposition='top center', textfont_size=10)
         st.plotly_chart(fig_alight, use_container_width=True)
 
