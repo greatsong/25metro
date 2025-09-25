@@ -87,12 +87,10 @@ if df_long is not None:
     # 무거운 계산은 캐시된 함수를 통해 수행
     cumulative_data = get_cumulative_data(df_long, combine_stations, analysis_type)
 
-    # --- FIX: 애니메이션 데이터 생성 로직 수정 ---
-    # 1. 각 시간대별 TOP N에 한 번이라도 들었던 모든 역을 '후보'로 선정
+    # 애니메이션 데이터 생성 로직
     top_n_per_slot = cumulative_data.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
     all_top_stations = top_n_per_slot['역명(호선)'].unique()
     
-    # 2. '후보' 역들의 전체 시간대 데이터만 필터링하여 애니메이션 데이터로 사용
     animation_data = cumulative_data[cumulative_data['역명(호선)'].isin(all_top_stations)]
 
     st.markdown("---")
@@ -116,6 +114,8 @@ if df_long is not None:
         yaxis_title="지하철역",
         showlegend=False,
         height=600,
+        # --- FIX: y축 라벨이 잘리지 않도록 상단 마진 추가 ---
+        margin=dict(l=0, r=0, t=100, b=20)
     )
     
     fig.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = animation_speed
@@ -123,7 +123,7 @@ if df_long is not None:
     
     if not animation_data.empty:
         max_value = animation_data['누적인원수'].max()
-        fig.update_xaxes(range=[0, max_value * 1.2])
+        fig.update_xaxes(range=[0, max_value * 1.25]) # 텍스트 공간을 위해 여유 공간 추가
     
     fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
 
