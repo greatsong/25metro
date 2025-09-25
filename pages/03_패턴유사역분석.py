@@ -44,11 +44,17 @@ def load_and_prep_data():
 
 # 패턴 분석용 데이터 생성 함수
 @st.cache_data
-def get_pattern_data(df_clean, combine_stations):
+def get_pattern_data(df_clean, combine_stations, analysis_type):
     """
     전처리된 데이터프레임을 받아 그룹화 및 정규화를 수행합니다.
     """
-    value_cols = [c for c in df_clean.columns if '_승차' in c or '_하차' in c]
+    # --- FIX: 분석 유형에 따라 사용할 컬럼 선택 ---
+    if analysis_type == '승차':
+        value_cols = [c for c in df_clean.columns if '_승차' in c]
+    elif analysis_type == '하차':
+        value_cols = [c for c in df_clean.columns if '_하차' in c]
+    else: # '종합'
+        value_cols = [c for c in df_clean.columns if '_승차' in c or '_하차' in c]
 
     if combine_stations:
         df_wide = df_clean.groupby('지하철역')[value_cols].sum()
@@ -57,12 +63,9 @@ def get_pattern_data(df_clean, combine_stations):
     
     df_wide.fillna(0, inplace=True)
     
-    # --- FIX: 정규화 방식을 '각 역의 총합으로 나눈 비율'로 변경 ---
-    # 각 역(행)의 총합을 계산합니다.
+    # 정규화: 각 역의 총합으로 나눈 비율로 변경
     row_sums = df_wide.sum(axis=1)
-    # 총합이 0인 경우 0으로 나누는 것을 방지하기 위해 1로 바꿔줍니다.
     row_sums[row_sums == 0] = 1
-    # 각 역의 데이터를 해당 역의 총합으로 나누어 비율을 만듭니다.
     df_normalized = df_wide.div(row_sums, axis=0)
     
     return df_normalized
@@ -76,9 +79,17 @@ df_clean = load_and_prep_data()
 if df_clean is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 패턴을 분석합니다.")
     
+    # --- NEW: 분석 기준 선택 라디오 버튼 추가 ---
+    analysis_type = st.radio(
+        "📈 분석 기준 선택",
+        ('종합', '승차', '하차'),
+        horizontal=True,
+        help="'종합'은 승하차를 모두 합산, '승차'와 '하차'는 각각의 데이터만으로 패턴을 분석합니다."
+    )
+
     top_n = st.slider("📊 비교할 유사역 개수 (TOP N)", 1, 10, 3, help="비교하고 싶은 상위 유사역의 개수를 선택하세요.")
 
-    df_pattern_normalized = get_pattern_data(df_clean.copy(), combine_stations)
+    df_pattern_normalized = get_pattern_data(df_clean.copy(), combine_stations, analysis_type)
 
     if combine_stations:
         station_list = sorted(df_pattern_normalized.index.to_list())
