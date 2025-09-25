@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# 데이터 로딩 및 전처리 함수 (오류 수정됨)
+# 데이터 로딩 함수 (모든 페이지에서 캐시 공유)
 @st.cache_data
 def load_data():
     dtype_spec = {'호선명': str, '지하철역': str}
@@ -15,22 +15,22 @@ def load_data():
         return None
     
     df.dropna(subset=['호선명', '지하철역'], inplace=True)
-        
     df = df.iloc[:, :-1]
+    
     col_names = ['사용월', '호선명', '역ID', '지하철역']
     for i in range(4, len(df.columns), 2):
         time_str = df.columns[i].split('~')[0][:2]
         col_names.append(f'{time_str}_승차')
         col_names.append(f'{time_str}_하차')
     df.columns = col_names
-
+    
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
         if df[col].dtype == 'object':
             df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         else:
             df[col] = df[col].fillna(0).astype(int)
-
+            
     id_vars = ['사용월', '호선명', '역ID', '지하철역']
     df_long = df.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
     df_long['시간대'] = df_long['시간구분'].str.split('_').str[0]
@@ -40,69 +40,64 @@ def load_data():
 
 df_long = load_data()
 
-st.title("🕒 시간대별 혼잡 분석")
-st.markdown("특정 시간대를 선택하여 승차 및 하차 인원이 가장 많은 지하철역을 확인해보세요.")
+st.header(" busiest subway stations by time of day")
+st.markdown("""
+- **시간, 승하차, TOP N**을 선택하여 해당 시간대에 가장 붐볐던 역을 확인합니다.
+- '동일 역명 데이터 합산'을 체크하면 모든 호선의 이용객을 합산하여 순위를 계산합니다.
+""")
 
 if df_long is not None:
-    # 시간대 선택 슬라이더
-    st.markdown("### ⏰ 분석할 시간대를 선택하세요 (24시간 기준)")
-    selected_hours = st.slider(
-        "시간을 선택해주세요.",
-        0, 23, (7, 9)  # 기본값: 오전 7-9시
-    )
-    
-    start_hour, end_hour = selected_hours
-    st.info(f"선택된 시간: **{start_hour:02d}시부터 {end_hour:02d}시까지**")
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        ride_alight_option = st.radio("승차/하차", ('승차', '하차'))
+        
+        time_list = sorted(df_long['시간대'].unique())
+        start_time, end_time = st.select_slider(
+            '시간을 선택하세요.',
+            options=time_list,
+            value=('08', '09')
+        )
+        
+        top_n = st.slider("TOP N", 5, 20, 10)
 
-    # 선택된 시간대의 데이터 필터링
-    hour_strings = [f"{h:02d}" for h in range(start_hour, end_hour + 1)]
-    filtered_df = df_long[df_long['시간대'].isin(hour_strings)]
+        combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 역별 순위를 계산합니다.")
 
-    if filtered_df.empty:
-        st.warning("선택하신 시간대에 해당하는 데이터가 없습니다.")
+    # 데이터 필터링
+    filtered_df = df_long[
+        (df_long['구분'] == ride_alight_option) &
+        (df_long['시간대'] >= start_time) &
+        (df_long['시간대'] <= end_time)
+    ]
+
+    if combine_stations:
+        # 역명 기준으로 합산
+        station_total = filtered_df.groupby('지하철역')['인원수'].sum().nlargest(top_n)
+        station_total = station_total.reset_index()
+        station_total['역명(호선)'] = station_total['지하철역']
     else:
-        # 승차/하차 데이터 분리 및 집계
-        grouped = filtered_df.groupby(['호선명', '지하철역', '구분'])['인원수'].sum().reset_index()
+        # 기존 방식 (호선 포함)
+        station_total = filtered_df.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(top_n)
+        station_total = station_total.reset_index()
+        station_total['역명(호선)'] = station_total['지하철역'] + "(" + station_total['호선명'] + ")"
         
-        # 승차 Top 10
-        ride_df = grouped[grouped['구분'] == '승차'].sort_values(by='인원수', ascending=False).head(10)
-        ride_df['역명(호선)'] = ride_df['지하철역'] + "(" + ride_df['호선명'] + ")"
+    station_total = station_total.sort_values(by='인원수', ascending=True)
 
-        # 하차 Top 10
-        alight_df = grouped[grouped['구분'] == '하차'].sort_values(by='인원수', ascending=False).head(10)
-        alight_df['역명(호선)'] = alight_df['지하철역'] + "(" + alight_df['호선명'] + ")"
-
-        st.markdown("---")
+    with col2:
+        title = f'**{start_time}시~{end_time}시** 가장 **{ride_alight_option}** 인원이 많은 역 (TOP {top_n})'
+        st.subheader(title)
         
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("📈 승차 인원 TOP 10")
-            fig_ride = px.bar(
-                ride_df, 
-                x='인원수', 
-                y='역명(호선)', 
-                orientation='h',
-                title=f'{start_hour:02d}시-{end_hour:02d}시 승차 TOP 10',
-                labels={'인원수': '총 승차 인원수', '역명(호선)': '지하철역'},
-                color='인원수',
-                color_continuous_scale=px.colors.sequential.Viridis
-            )
-            fig_ride.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_ride, use_container_width=True)
-
-        with col2:
-            st.subheader("📉 하차 인원 TOP 10")
-            fig_alight = px.bar(
-                alight_df, 
-                x='인원수', 
-                y='역명(호선)', 
-                orientation='h',
-                title=f'{start_hour:02d}시-{end_hour:02d}시 하차 TOP 10',
-                labels={'인원수': '총 하차 인원수', '역명(호선)': '지하철역'},
-                color='인원수',
-                color_continuous_scale=px.colors.sequential.Plasma
-            )
-            fig_alight.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_alight, use_container_width=True)
+        fig = px.bar(
+            station_total,
+            x='인원수',
+            y='역명(호선)',
+            orientation='h',
+            text='인원수'
+        )
+        fig.update_traces(texttemplate='%{text:,.0f}명', textposition='outside')
+        fig.update_layout(
+            yaxis_title='지하철역',
+            xaxis_title=f'{ride_alight_option} 인원수',
+            yaxis={'categoryorder':'total ascending'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
