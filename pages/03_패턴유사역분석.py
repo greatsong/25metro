@@ -72,6 +72,10 @@ df_clean = load_and_prep_data()
 
 if df_clean is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 패턴을 분석합니다.")
+    
+    # --- NEW: TOP N 선택 슬라이더 추가 ---
+    top_n = st.slider("📊 비교할 유사역 개수 (TOP N)", 1, 10, 3, help="비교하고 싶은 상위 유사역의 개수를 선택하세요.")
+
     df_pattern_normalized = get_pattern_data(df_clean.copy(), combine_stations)
 
     if combine_stations:
@@ -83,13 +87,12 @@ if df_clean is not None:
         sim_df = pd.DataFrame(similarity.T, index=df_pattern_normalized.index, columns=['유사도'])
         sim_df = sim_df.drop(selected_station_name).sort_values(by='유사도', ascending=False)
         
-        st.subheader(f"'{selected_station_name}'(와)과 패턴이 가장 비슷한 역 TOP 3")
-        top_3_similar = sim_df.head(3)
+        st.subheader(f"'{selected_station_name}'(와)과 패턴이 가장 비슷한 역 TOP {top_n}")
+        top_n_similar = sim_df.head(top_n)
         
     else:
         station_list = sorted(df_pattern_normalized.index.to_list(), key=lambda x: (x[1], x[0]))
         
-        # --- NEW: 기본 선택역을 '2호선 강남'으로 설정 ---
         default_station = ('2호선', '강남')
         default_index = 0
         if default_station in station_list:
@@ -107,10 +110,10 @@ if df_clean is not None:
         sim_df = pd.DataFrame(similarity.T, index=df_pattern_normalized.index, columns=['유사도'])
         sim_df = sim_df.drop(selected_station_tuple).sort_values(by='유사도', ascending=False)
 
-        st.subheader(f"'{selected_station_tuple[1]} ({selected_station_tuple[0]})'(와)과 패턴이 가장 비슷한 역 TOP 3")
-        top_3_similar = sim_df.head(3)
+        st.subheader(f"'{selected_station_tuple[1]} ({selected_station_tuple[0]})'(와)과 패턴이 가장 비슷한 역 TOP {top_n}")
+        top_n_similar = sim_df.head(top_n)
 
-    for i, (idx, row) in enumerate(top_3_similar.iterrows()):
+    for i, (idx, row) in enumerate(top_n_similar.iterrows()):
         rank = i + 1
         station_name_display = f"{idx} (통합)" if combine_stations else f"{idx[1]} ({idx[0]})"
         st.metric(f"👑 {rank}위: {station_name_display}", f"유사도: {row['유사도']:.2%}")
@@ -118,27 +121,21 @@ if df_clean is not None:
     # --- 패턴 비교 그래프 ---
     st.markdown("---")
     st.subheader("📊 패턴 비교 그래프")
-    st.markdown("기준 역과 TOP 3 유사역의 시간대별 인원 패턴(비율 기준)을 비교합니다.")
+    st.markdown(f"기준 역과 TOP {top_n} 유사역의 시간대별 인원 패턴(비율 기준)을 비교합니다.")
 
     if combine_stations:
-        stations_to_plot = [selected_station_name] + top_3_similar.index.to_list()
+        stations_to_plot = [selected_station_name] + top_n_similar.index.to_list()
     else:
-        stations_to_plot = [selected_station_tuple] + top_3_similar.index.to_list()
+        stations_to_plot = [selected_station_tuple] + top_n_similar.index.to_list()
 
     plot_df = df_pattern_normalized.loc[stations_to_plot].T.reset_index()
     
-    # --- FIX: 컬럼 이름 변경 로직 수정 ---
-    # 첫 번째 열을 '시간구분'으로 안정적으로 변경
     plot_df = plot_df.rename(columns={plot_df.columns[0]: '시간구분'})
 
-    # '합산' 모드가 아닐 때 (열 이름이 튜플일 때)
     if not combine_stations:
-        # 새로운 컬럼 이름 리스트를 생성 (첫번째는 '시간구분')
         new_columns = ['시간구분']
-        # 두 번째 열부터 순회하며 튜플을 문자열로 변환
         for col in plot_df.columns[1:]:
             new_columns.append(f"{col[1]} ({col[0]})")
-        # 데이터프레임의 컬럼을 새로운 리스트로 지정
         plot_df.columns = new_columns
     
     plot_df_long = plot_df.melt(
