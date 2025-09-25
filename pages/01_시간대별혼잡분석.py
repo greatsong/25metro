@@ -115,4 +115,3 @@ if df_long is not None:
         fig_alight.update_traces(texttemplate='%{text:,.0f}명', textposition='outside', marker_color='#FFA500')
         fig_alight.update_layout(yaxis_title='지하철역', xaxis_title='하차 인원수', yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig_alight, use_container_width=True)
-
