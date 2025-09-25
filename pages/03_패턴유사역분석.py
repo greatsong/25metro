@@ -88,9 +88,17 @@ if df_clean is not None:
         
     else:
         station_list = sorted(df_pattern_normalized.index.to_list(), key=lambda x: (x[1], x[0]))
+        
+        # --- NEW: 기본 선택역을 '2호선 강남'으로 설정 ---
+        default_station = ('2호선', '강남')
+        default_index = 0
+        if default_station in station_list:
+            default_index = station_list.index(default_station)
+            
         selected_station_tuple = st.selectbox(
             "기준이 될 역을 선택하세요.",
             station_list,
+            index=default_index,
             format_func=lambda x: f"{x[1]} ({x[0]})"
         )
         selected_station_pattern = df_pattern_normalized.loc[selected_station_tuple]
@@ -119,14 +127,12 @@ if df_clean is not None:
 
     plot_df = df_pattern_normalized.loc[stations_to_plot].T.reset_index()
     
-    # --- FIX: reset_index()로 생성된 첫 번째 열의 이름을 '시간구분'으로 강제 지정 ---
-    # 이 방법은 reset_index()가 어떤 이름의 열을 생성하든 상관없이 안정적으로 작동합니다.
-    time_col_name = plot_df.columns[0]
-    plot_df.rename(columns={time_col_name: '시간구분'}, inplace=True)
+    # --- FIX: reset_index()로 생성된 첫 번째 열을 안정적으로 '시간구분'으로 변경 ---
+    plot_df = plot_df.rename(columns={plot_df.columns[0]: '시간구분'})
 
     if not combine_stations:
         display_names = {col: f"{col[1]} ({col[0]})" for col in plot_df.columns if isinstance(col, tuple)}
-        plot_df.rename(columns=display_names, inplace=True)
+        plot_df = plot_df.rename(columns=display_names)
     
     plot_df_long = plot_df.melt(
         id_vars='시간구분',
