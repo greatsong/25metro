@@ -40,7 +40,7 @@ def load_data():
 
 df_long = load_data()
 
-st.header(" busiest subway stations by time of day")
+st.header("⏱️ 시간대별 가장 붐비는 역")
 st.markdown("""
 - **시간, TOP N**을 선택하여 해당 시간대에 가장 붐볐던 역의 승차 및 하차 순위를 확인합니다.
 - '동일 역명 데이터 합산'을 체크하면 모든 호선의 이용객을 합산하여 순위를 계산합니다.
