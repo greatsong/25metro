@@ -42,7 +42,7 @@ def load_and_prep_data():
     df_long = df_long.drop(columns=['시간구분'])
     return df_long
 
-# --- FIX: 무거운 계산을 위한 별도의 캐시 함수 ---
+# 무거운 계산을 위한 별도의 캐시 함수
 @st.cache_data
 def get_cumulative_data(df_long, combine_stations, analysis_type):
     """
@@ -87,8 +87,13 @@ if df_long is not None:
     # 무거운 계산은 캐시된 함수를 통해 수행
     cumulative_data = get_cumulative_data(df_long, combine_stations, analysis_type)
 
-    # 가벼운 TOP N 필터링만 매번 수행
-    animation_data = cumulative_data.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
+    # --- FIX: 애니메이션 데이터 생성 로직 수정 ---
+    # 1. 각 시간대별 TOP N에 한 번이라도 들었던 모든 역을 '후보'로 선정
+    top_n_per_slot = cumulative_data.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
+    all_top_stations = top_n_per_slot['역명(호선)'].unique()
+    
+    # 2. '후보' 역들의 전체 시간대 데이터만 필터링하여 애니메이션 데이터로 사용
+    animation_data = cumulative_data[cumulative_data['역명(호선)'].isin(all_top_stations)]
 
     st.markdown("---")
     st.info("▶️ 아래 그래프의 재생 버튼을 눌러 시간대별 **누적** 순위 변화를 확인하세요!")
@@ -116,8 +121,10 @@ if df_long is not None:
     fig.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = animation_speed
     fig.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = int(animation_speed * 0.3)
     
-    max_value = animation_data['누적인원수'].max()
-    fig.update_xaxes(range=[0, max_value * 1.2])
+    if not animation_data.empty:
+        max_value = animation_data['누적인원수'].max()
+        fig.update_xaxes(range=[0, max_value * 1.2])
+    
     fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
 
     st.plotly_chart(fig, use_container_width=True)
