@@ -51,12 +51,17 @@ if df_clean is not None:
     # 역 선택 목록 준비
     if combine_stations:
         station_list = sorted(df_clean['지하철역'].unique())
-        # 기본 선택 역 설정
-        default_station_1 = "강남" if "강남" in station_list else station_list[0]
-        default_station_2 = "홍대입구" if "홍대입구" in station_list else station_list[1]
         
-        station1_name = st.selectbox("첫 번째 역을 선택하세요.", station_list, index=station_list.index(default_station_1))
-        station2_name = st.selectbox("두 번째 역을 선택하세요.", station_list, index=station_list.index(default_station_2))
+        # --- FIX: 기본 선택 역을 데이터에 존재하는 값으로 안전하게 설정 ---
+        if len(station_list) > 1:
+            default_index_1 = 0
+            default_index_2 = 1
+        else: # 데이터에 역이 하나뿐인 경우
+            default_index_1 = 0
+            default_index_2 = 0
+            
+        station1_name = st.selectbox("첫 번째 역을 선택하세요.", station_list, index=default_index_1)
+        station2_name = st.selectbox("두 번째 역을 선택하세요.", station_list, index=default_index_2)
 
         # 데이터 집계
         station1_data = df_clean[df_clean['지하철역'] == station1_name].sum(numeric_only=True)
@@ -69,7 +74,7 @@ if df_clean is not None:
     else:
         station_list = sorted(list(zip(df_clean['호선명'], df_clean['지하철역'])), key=lambda x: (x[1], x[0]))
         
-        # 기본 선택 역 설정
+        # --- FIX: 기본 선택 역을 데이터에 존재하는 값으로 안전하게 설정 ---
         default_station_1 = ('2호선', '강남')
         default_station_2 = ('2호선', '홍대입구')
         default_index_1 = station_list.index(default_station_1) if default_station_1 in station_list else 0
@@ -126,3 +131,4 @@ if df_clean is not None:
         )
         fig_alight.update_layout(xaxis_title="시간", yaxis_title="하차 인원수")
         st.plotly_chart(fig_alight, use_container_width=True)
+
