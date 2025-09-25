@@ -67,28 +67,19 @@ def get_animation_data(df_long, combine_stations, analysis_type, top_n):
 
     grouped['누적인원수'] = grouped.groupby('역명(호선)')['인원수'].cumsum()
     
-    # --- FIX: 데이터 무결성을 보장하는 새로운 애니메이션 데이터 생성 로직 ---
-    # 1. 데이터를 피벗하여 각 역이 모든 시간대에 대한 데이터를 갖도록 구조 변경
-    pivot_df = grouped.pivot_table(index='시간대', columns='역명(호선)', values='누적인원수')
-
-    # 2. 누적값이므로, 없는 데이터(NaN)는 이전 시간의 값으로 채움 (forward fill)
-    pivot_df.ffill(inplace=True)
-    pivot_df.fillna(0, inplace=True) # 맨 처음 NaN은 0으로 채움
-
-    # 3. 각 시간대별 TOP N에 한 번이라도 들었던 모든 역을 '후보'로 선정
-    all_top_stations = set()
-    for time_index in pivot_df.index:
-        top_stations_at_time = pivot_df.loc[time_index].nlargest(top_n).index
-        all_top_stations.update(top_stations_at_time)
-    
-    # 4. 후보 역들의 데이터만 필터링하고, 다시 long format으로 변환
-    animation_df_wide = pivot_df[list(all_top_stations)]
-    animation_data = animation_df_wide.melt(
-        ignore_index=False, 
-        var_name='역명(호선)', 
-        value_name='누적인원수'
-    ).reset_index()
-
+    # --- FINAL FIX: y축을 순위로 사용하는 새로운 데이터 생성 로직 ---
+    # 1. 각 시간대별로 TOP N을 필터링하고 순위 부여
+    final_frames = []
+    for time_slot in time_slots:
+        # 해당 시간대의 데이터 필터링 및 정렬
+        top_n_at_time = grouped[grouped['시간대'] == time_slot].nlargest(top_n, '누적인원수')
+        
+        # 순위 부여 (1위가 가장 위로 가도록)
+        top_n_at_time['순위'] = range(1, len(top_n_at_time) + 1)
+        final_frames.append(top_n_at_time)
+        
+    # 모든 프레임 데이터를 하나로 합침
+    animation_data = pd.concat(final_frames, ignore_index=True)
     return animation_data
 
 # --- 앱 UI 부분 ---
@@ -112,25 +103,27 @@ if df_long is not None:
     st.markdown("---")
     st.info("▶️ 아래 그래프의 재생 버튼을 눌러 시간대별 **누적** 순위 변화를 확인하세요!")
 
+    # --- FINAL FIX: y축을 '순위'로, 텍스트를 '역명(호선)'으로 변경 ---
     fig = px.bar(
         animation_data,
         x="누적인원수",
-        y="역명(호선)",
+        y="순위",
         orientation='h',
         color="역명(호선)",
         animation_frame="시간대",
-        animation_group="역명(호선)",
-        text="누적인원수",
+        text="역명(호선)", # 막대 위에 역 이름을 표시
         title=f"시간대별 누적 {analysis_type} 인원 TOP {top_n} 레이싱 차트"
     )
 
-    chart_height = len(animation_data['역명(호선)'].unique()) * 35 + 150
+    chart_height = top_n * 45 + 150
 
-    fig.update_yaxes(categoryorder="total ascending")
+    # y축을 뒤집어서 1위가 위로 오게 하고, 라벨은 보이지 않게 처리
+    fig.update_yaxes(autorange="reversed", showticklabels=False, title="순위")
+    
     fig.update_layout(
         xaxis_title="누적 인원수",
-        yaxis_title="지하철역",
-        showlegend=False,
+        yaxis_title="순위", # y축 제목은 '순위'
+        showlegend=True, # 범례를 표시하여 색상과 역 이름을 매칭
         height=chart_height,
         margin=dict(l=0, r=0, t=100, b=20)
     )
@@ -140,9 +133,15 @@ if df_long is not None:
     
     if not animation_data.empty:
         max_value = animation_data['누적인원수'].max()
-        fig.update_xaxes(range=[0, max_value * 1.25])
+        fig.update_xaxes(range=[0, max_value * 1.3])
     
-    fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+    # 막대 위 텍스트(역 이름)와 막대 끝 숫자 텍스트를 모두 설정
+    fig.update_traces(
+        texttemplate='%{text} (%{x:,.0f})', 
+        textposition='outside',
+        textfont_size=12,
+        insidetextanchor='end'
+    )
 
     st.plotly_chart(fig, use_container_width=True)
 
