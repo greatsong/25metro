@@ -111,3 +111,49 @@ if df_long is not None and df_raw is not None:
         station_name_display = f"{idx} (통합)" if combine_stations else f"{idx[1]} ({idx[0]})"
         st.metric(f"👑 {rank}위: {station_name_display}", f"유사도: {row['유사도']:.2%}")
 
+    # --- NEW: 패턴 비교 그래프 추가 ---
+    st.markdown("---")
+    st.subheader("📊 패턴 비교 그래프")
+    st.markdown("기준 역과 TOP 3 유사역의 시간대별 인원 패턴(비율 기준)을 비교합니다.")
+
+    # 그래프를 그릴 역 목록 생성
+    if combine_stations:
+        stations_to_plot = [selected_station_name] + top_3_similar.index.to_list()
+    else:
+        stations_to_plot = [selected_station_tuple] + top_3_similar.index.to_list()
+
+    # 플롯 데이터 준비 (Wide to Long)
+    plot_df = df_pattern_normalized.loc[stations_to_plot].T.reset_index()
+    plot_df = plot_df.rename(columns={'index': '시간구분'})
+
+    # 역 이름을 예쁘게 만들기 (튜플 -> 문자열)
+    if not combine_stations:
+        display_names = {col: f"{col[1]} ({col[0]})" for col in plot_df.columns if isinstance(col, tuple)}
+        plot_df = plot_df.rename(columns=display_names)
+    
+    # Plotly를 위한 Long format으로 최종 변환
+    plot_df_long = plot_df.melt(
+        id_vars='시간구분',
+        var_name='역 정보',
+        value_name='정규화된 인원수 (비율)'
+    )
+
+    # 꺾은선 그래프 생성
+    fig = px.line(
+        plot_df_long,
+        x='시간구분',
+        y='정규화된 인원수 (비율)',
+        color='역 정보',
+        markers=True,
+        title='선택역 및 유사역 패턴 비교'
+    )
+
+    fig.update_layout(
+        xaxis_title="시간 구분",
+        yaxis_title="정규화된 인원수 (비율)",
+        legend_title="역 정보",
+        xaxis={'tickangle': -45}
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
