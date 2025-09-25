@@ -48,7 +48,6 @@ def get_pattern_data(df_clean, combine_stations, analysis_type):
     """
     전처리된 데이터프레임을 받아 그룹화 및 정규화를 수행합니다.
     """
-    # --- FIX: 분석 유형에 따라 사용할 컬럼 선택 ---
     if analysis_type == '승차':
         value_cols = [c for c in df_clean.columns if '_승차' in c]
     elif analysis_type == '하차':
@@ -72,14 +71,13 @@ def get_pattern_data(df_clean, combine_stations, analysis_type):
 
 # --- 앱 UI 부분 ---
 st.header("🤔 나와 비슷한 역은 어디?")
-st.markdown("선택한 역과 시간대별 승하차 패턴이 가장 유사한 역을 찾아봅니다.")
+st.markdown("선택한 역과 시간대별 승하차 패턴이 가장 유사한 역을 찾아 비교합니다.")
 
 df_clean = load_and_prep_data()
 
 if df_clean is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 패턴을 분석합니다.")
     
-    # --- NEW: 분석 기준 선택 라디오 버튼 추가 ---
     analysis_type = st.radio(
         "📈 분석 기준 선택",
         ('종합', '승차', '하차'),
@@ -99,8 +97,6 @@ if df_clean is not None:
         similarity = cosine_similarity([selected_station_pattern], df_pattern_normalized)
         sim_df = pd.DataFrame(similarity.T, index=df_pattern_normalized.index, columns=['유사도'])
         sim_df = sim_df.drop(selected_station_name).sort_values(by='유사도', ascending=False)
-        
-        st.subheader(f"'{selected_station_name}'(와)과 패턴이 가장 비슷한 역 TOP {top_n}")
         top_n_similar = sim_df.head(top_n)
         
     else:
@@ -122,19 +118,10 @@ if df_clean is not None:
         similarity = cosine_similarity([selected_station_pattern], df_pattern_normalized)
         sim_df = pd.DataFrame(similarity.T, index=df_pattern_normalized.index, columns=['유사도'])
         sim_df = sim_df.drop(selected_station_tuple).sort_values(by='유사도', ascending=False)
-
-        st.subheader(f"'{selected_station_tuple[1]} ({selected_station_tuple[0]})'(와)과 패턴이 가장 비슷한 역 TOP {top_n}")
         top_n_similar = sim_df.head(top_n)
 
-    for i, (idx, row) in enumerate(top_n_similar.iterrows()):
-        rank = i + 1
-        station_name_display = f"{idx} (통합)" if combine_stations else f"{idx[1]} ({idx[0]})"
-        st.metric(f"👑 {rank}위: {station_name_display}", f"유사도: {row['유사도']:.2%}")
-
-    # --- 패턴 비교 그래프 ---
-    st.markdown("---")
-    st.subheader("📊 패턴 비교 그래프")
-    st.markdown(f"기준 역과 TOP {top_n} 유사역의 시간대별 인원 패턴(비율 기준)을 비교합니다.")
+    # --- 패턴 비교 그래프 (먼저 표시) ---
+    st.subheader(f"📊 '{selected_station_name if combine_stations else selected_station_tuple[1]}' 패턴 비교 그래프")
 
     if combine_stations:
         stations_to_plot = [selected_station_name] + top_n_similar.index.to_list()
@@ -162,14 +149,21 @@ if df_clean is not None:
         x='시간구분',
         y='정규화된 인원수 (비율)',
         color='역 정보',
-        markers=True,
-        title='선택역 및 유사역 패턴 비교'
+        markers=True
     )
     fig.update_layout(
+        title=f'기준 역과 TOP {top_n} 유사역의 시간대별 인원 패턴',
         xaxis_title="시간 구분",
-        yaxis_title="정규화된 인원수 (비율)",
+        yaxis_title="인원 비율",
         legend_title="역 정보",
         xaxis={'tickangle': -45}
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    # --- 유사도 순위 (그래프 아래에 표시) ---
+    st.subheader(f"📈 유사도 순위 TOP {top_n}")
+    for i, (idx, row) in enumerate(top_n_similar.iterrows()):
+        rank = i + 1
+        station_name_display = f"{idx} (통합)" if combine_stations else f"{idx[1]} ({idx[0]})"
+        st.metric(f"👑 {rank}위: {station_name_display}", f"유사도: {row['유사도']:.2%}")
 
