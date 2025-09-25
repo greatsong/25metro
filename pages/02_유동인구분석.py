@@ -44,13 +44,13 @@ st.header("🚉 유동인구가 가장 많은 역은?")
 st.markdown("전체 또는 특정 호선에서 하루 동안 가장 많은 사람이 오고 간 역을 확인합니다.")
 
 if df_long is not None:
+    top_n = st.slider("📈 TOP N 선택", 5, 50, 20)
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 역별 순위를 계산합니다.")
 
     # 데이터 집계
     if combine_stations:
         st.info("동일 역명 합산 모드에서는 전체 호선 기준으로 유동인구를 분석합니다.")
-        total_traffic = df_long.groupby('지하철역')['인원수'].sum().nlargest(20)
-        total_traffic = total_traffic.reset_index()
+        total_traffic = df_long.groupby('지하철역')['인원수'].sum().nlargest(top_n).reset_index()
         total_traffic['역명(호선)'] = total_traffic['지하철역'] + " (통합)"
     else:
         line_list = ['전체'] + sorted(df_long['호선명'].unique())
@@ -61,20 +61,22 @@ if df_long is not None:
         else:
             df_filtered = df_long[df_long['호선명'] == selected_line]
         
-        total_traffic = df_filtered.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(20)
-        total_traffic = total_traffic.reset_index()
+        total_traffic = df_filtered.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(top_n).reset_index()
         total_traffic['역명(호선)'] = total_traffic['지하철역'] + "(" + total_traffic['호선명'] + ")"
         
-    total_traffic = total_traffic.sort_values(by='인원수', ascending=False)
+    # 수평 막대 그래프를 위해 오름차순 정렬 (큰 값이 위로)
+    total_traffic = total_traffic.sort_values(by='인원수', ascending=True)
     
     # 시각화
-    st.subheader(f"📈 유동인구 TOP 20 역")
+    st.subheader(f"📈 유동인구 TOP {top_n} 역")
     fig = px.bar(
         total_traffic,
-        x='역명(호선)',
-        y='인원수',
+        x='인원수',
+        y='역명(호선)',
+        orientation='h',
         text='인원수',
         title='총 승하차 인원수 기준'
     )
     fig.update_traces(texttemplate='%{text:,.0f}명', textposition='outside')
+    fig.update_layout(yaxis_title='지하철역', xaxis_title='총 인원수', yaxis={'categoryorder':'total ascending'})
     st.plotly_chart(fig, use_container_width=True)
