@@ -5,9 +5,13 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
-# 데이터 로딩 함수 (모든 페이지에서 캐시 공유)
+# 데이터 로딩 및 전처리 함수
 @st.cache_data
-def load_data():
+def load_and_prep_data():
+    """
+    데이터를 로드하고 모든 전처리를 수행하여 분석에 바로 사용할 수 있는
+    깨끗한 '와이드' 포맷의 데이터프레임을 반환합니다.
+    """
     dtype_spec = {'호선명': str, '지하철역': str}
     try:
         df = pd.read_csv('지하철데이터.csv', encoding='cp949', dtype=dtype_spec)
@@ -15,12 +19,12 @@ def load_data():
         df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig', dtype=dtype_spec)
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
-        return None, None
+        return None
     
     df.dropna(subset=['호선명', '지하철역'], inplace=True)
-    df_raw = df.copy() # 원본 데이터 복사
-    df = df.iloc[:, :-1]
+    df = df.iloc[:, :-1].copy() # 불필요한 마지막 열 제거 및 복사본 생성
     
+    # 컬럼 이름 재정의
     col_names = ['사용월', '호선명', '역ID', '지하철역']
     for i in range(4, len(df.columns), 2):
         time_str = df.columns[i].split('~')[0][:2]
@@ -28,6 +32,7 @@ def load_data():
         col_names.append(f'{time_str}_하차')
     df.columns = col_names
     
+    # 인원수 데이터 숫자형으로 변환
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
         if df[col].dtype == 'object':
@@ -35,35 +40,27 @@ def load_data():
         else:
             df[col] = df[col].fillna(0).astype(int)
             
-    id_vars = ['사용월', '호선명', '역ID', '지하철역']
-    df_long = df.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
-    
-    return df_long, df_raw # df_long과 원본 df_raw 반환
+    return df
 
 # 패턴 분석용 데이터 생성 함수
 @st.cache_data
-def get_pattern_data(df_raw, combine_stations):
-    id_vars = ['사용월', '호선명', '역ID', '지하철역']
-    df = df_raw.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
-    df['시간구분'] = df['시간구분'].str.replace(r'~.*', '', regex=True)
-
-    # 문자열 인원수 -> 숫자 변환
-    if df['인원수'].dtype == 'object':
-        df['인원수'] = pd.to_numeric(df['인원수'].str.replace(',', ''), errors='coerce').fillna(0)
+def get_pattern_data(df_clean, combine_stations):
+    """
+    전처리된 데이터프레임을 받아 그룹화 및 정규화를 수행합니다.
+    """
+    value_cols = [c for c in df_clean.columns if '_승차' in c or '_하차' in c]
 
     if combine_stations:
-        df_wide = df.groupby(['지하철역', '시간구분'])['인원수'].sum().unstack()
+        df_wide = df_clean.groupby('지하철역')[value_cols].sum()
     else:
-        df_wide = df.groupby(['호선명', '지하철역', '시간구분'])['인원수'].sum().unstack()
+        df_wide = df_clean.set_index(['호선명', '지하철역'])[value_cols]
     
     df_wide.fillna(0, inplace=True)
     
-    numeric_cols = df_wide.select_dtypes(include=np.number).columns
-    
     scaler = MinMaxScaler()
-    df_normalized_data = scaler.fit_transform(df_wide[numeric_cols])
+    df_normalized_data = scaler.fit_transform(df_wide)
     
-    df_normalized = pd.DataFrame(df_normalized_data, index=df_wide.index, columns=numeric_cols)
+    df_normalized = pd.DataFrame(df_normalized_data, index=df_wide.index, columns=df_wide.columns)
     
     return df_normalized
 
@@ -71,11 +68,11 @@ def get_pattern_data(df_raw, combine_stations):
 st.header("🤔 나와 비슷한 역은 어디?")
 st.markdown("선택한 역과 시간대별 승하차 패턴이 가장 유사한 역을 찾아봅니다.")
 
-df_long, df_raw = load_data()
+df_clean = load_and_prep_data()
 
-if df_long is not None and df_raw is not None:
+if df_clean is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 패턴을 분석합니다.")
-    df_pattern_normalized = get_pattern_data(df_raw.copy(), combine_stations)
+    df_pattern_normalized = get_pattern_data(df_clean.copy(), combine_stations)
 
     if combine_stations:
         station_list = sorted(df_pattern_normalized.index.to_list())
@@ -122,9 +119,9 @@ if df_long is not None and df_raw is not None:
 
     plot_df = df_pattern_normalized.loc[stations_to_plot].T.reset_index()
     
-    # --- FIX: reset_index()로 생성된 열의 이름을 안정적으로 변경 ---
-    time_col_name = plot_df.columns[0]
-    plot_df.rename(columns={time_col_name: '시간구분'}, inplace=True)
+    # reset_index()는 인덱스 이름이 없을 경우 'index'라는 이름의 열을 생성합니다.
+    # 이를 '시간구분'으로 명시적으로 변경하여 오류를 방지합니다.
+    plot_df.rename(columns={'index': '시간구분'}, inplace=True)
 
     if not combine_stations:
         display_names = {col: f"{col[1]} ({col[0]})" for col in plot_df.columns if isinstance(col, tuple)}
