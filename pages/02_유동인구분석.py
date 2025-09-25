@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# 데이터 로딩 및 전처리 함수 (오류 수정됨)
+# 데이터 로딩 함수 (모든 페이지에서 캐시 공유)
 @st.cache_data
 def load_data():
     dtype_spec = {'호선명': str, '지하철역': str}
@@ -15,22 +15,22 @@ def load_data():
         return None
     
     df.dropna(subset=['호선명', '지하철역'], inplace=True)
-        
     df = df.iloc[:, :-1]
+    
     col_names = ['사용월', '호선명', '역ID', '지하철역']
     for i in range(4, len(df.columns), 2):
         time_str = df.columns[i].split('~')[0][:2]
         col_names.append(f'{time_str}_승차')
         col_names.append(f'{time_str}_하차')
     df.columns = col_names
-
+    
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
         if df[col].dtype == 'object':
             df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         else:
             df[col] = df[col].fillna(0).astype(int)
-
+            
     id_vars = ['사용월', '호선명', '역ID', '지하철역']
     df_long = df.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
     df_long['시간대'] = df_long['시간구분'].str.split('_').str[0]
@@ -40,59 +40,41 @@ def load_data():
 
 df_long = load_data()
 
-st.title("🚶 유동인구 분석")
-st.markdown("총 승하차 인원을 기준으로 유동인구가 가장 많은 역을 전체 및 호선별로 살펴봅니다.")
+st.header("🚉 유동인구가 가장 많은 역은?")
+st.markdown("전체 또는 특정 호선에서 하루 동안 가장 많은 사람이 오고 간 역을 확인합니다.")
 
 if df_long is not None:
-    # 역별 총 유동인구 계산
-    total_traffic = df_long.groupby(['호선명', '지하철역'])['인원수'].sum().reset_index()
-    total_traffic = total_traffic.sort_values(by='인원수', ascending=False)
-    total_traffic.rename(columns={'인원수': '총유동인구'}, inplace=True)
-    total_traffic['역명(호선)'] = total_traffic['지하철역'] + "(" + total_traffic['호선명'] + ")"
+    combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 역별 순위를 계산합니다.")
 
-    st.markdown("---")
-
-    # 전체 유동인구 TOP 15
-    st.subheader("👑 서울 전체 유동인구 TOP 15")
-    top_15_all = total_traffic.head(15)
-    fig_all = px.bar(
-        top_15_all,
-        x='총유동인구',
-        y='역명(호선)',
-        orientation='h',
-        title='서울 지하철 전체 유동인구 TOP 15',
-        labels={'총유동인구': '총 유동인구 (승하차 합계)', '역명(호선)': '지하철역'},
-        color='총유동인구',
-        color_continuous_scale=px.colors.sequential.Cividis_r
-    )
-    fig_all.update_layout(yaxis={'categoryorder':'total ascending'})
-    st.plotly_chart(fig_all, use_container_width=True)
-
-    st.markdown("---")
-
-    # 호선별 유동인구 분석
-    st.subheader("🚇 호선별 유동인구 분석")
-    
-    # 호선 선택
-    unique_lines = df_long['호선명'].unique().tolist()
-    line_list = ['전체'] + sorted(unique_lines)
-    selected_line = st.selectbox('분석할 호선을 선택하세요.', line_list)
-
-    if selected_line == '전체':
-        st.info("현재 전체 호선에 대한 유동인구 순위를 보고 계십니다. 특정 호선을 선택하여 자세히 살펴보세요.")
+    # 데이터 집계
+    if combine_stations:
+        st.info("동일 역명 합산 모드에서는 전체 호선 기준으로 유동인구를 분석합니다.")
+        total_traffic = df_long.groupby('지하철역')['인원수'].sum().nlargest(20)
+        total_traffic = total_traffic.reset_index()
+        total_traffic['역명(호선)'] = total_traffic['지하철역'] + " (통합)"
     else:
-        line_traffic = total_traffic[total_traffic['호선명'] == selected_line].head(15)
+        line_list = ['전체'] + sorted(df_long['호선명'].unique())
+        selected_line = st.selectbox('호선을 선택하세요.', line_list)
         
-        fig_line = px.bar(
-            line_traffic,
-            x='총유동인구',
-            y='지하철역',
-            orientation='h',
-            title=f'{selected_line} 유동인구 TOP 15',
-            labels={'총유동인구': '총 유동인구 (승하차 합계)', '지하철역': f'{selected_line} 역'},
-            color='총유동인구',
-            color_continuous_scale=px.colors.sequential.OrRd
-        )
-        fig_line.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_line, use_container_width=True)
-
+        if selected_line == '전체':
+            df_filtered = df_long
+        else:
+            df_filtered = df_long[df_long['호선명'] == selected_line]
+        
+        total_traffic = df_filtered.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(20)
+        total_traffic = total_traffic.reset_index()
+        total_traffic['역명(호선)'] = total_traffic['지하철역'] + "(" + total_traffic['호선명'] + ")"
+        
+    total_traffic = total_traffic.sort_values(by='인원수', ascending=False)
+    
+    # 시각화
+    st.subheader(f"📈 유동인구 TOP 20 역")
+    fig = px.bar(
+        total_traffic,
+        x='역명(호선)',
+        y='인원수',
+        text='인원수',
+        title='총 승하차 인원수 기준'
+    )
+    fig.update_traces(texttemplate='%{text:,.0f}명', textposition='outside')
+    st.plotly_chart(fig, use_container_width=True)
