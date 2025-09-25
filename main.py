@@ -1,114 +1,109 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from PIL import Image
 
-# Streamlit 페이지 설정
-st.set_page_config(
-    page_title="🚇 서울 지하철 데이터 분석 대시보드",
-    page_icon="🚇",
-    layout="wide",
-)
-
-# 데이터 로딩 및 전처리 함수 (Streamlit 캐싱으로 성능 최적화)
+# 데이터 로딩 함수 (다른 페이지와 캐시 공유)
 @st.cache_data
 def load_data():
     """
-    지하철 데이터를 불러오고 기본 전처리를 수행하는 함수.
-    결과는 캐시되어 페이지 이동 시에도 데이터를 다시 불러오지 않습니다.
+    데이터를 불러오고 기본적인 전처리를 수행합니다.
     """
-    # 데이터 타입을 지정하여 불러오기 (TypeError 방지)
     dtype_spec = {'호선명': str, '지하철역': str}
     try:
-        # cp949 인코딩으로 먼저 시도
         df = pd.read_csv('지하철데이터.csv', encoding='cp949', dtype=dtype_spec)
     except UnicodeDecodeError:
-        # 실패 시 utf-8-sig 인코딩으로 재시도 (BOM 문제 해결)
         df = pd.read_csv('지하철데이터.csv', encoding='utf-8-sig', dtype=dtype_spec)
     except FileNotFoundError:
         st.error("😥 '지하철데이터.csv' 파일을 찾을 수 없습니다. 프로젝트 루트 디렉토리에 파일을 업로드해주세요.")
-        return None, None, None
-
-    # '호선명' 또는 '지하철역'이 비어있는 행 제거 (오류 방지)
+        return None
+    
     df.dropna(subset=['호선명', '지하철역'], inplace=True)
-
-    # 불필요한 마지막 '등록일자' 열 제거
     df = df.iloc[:, :-1]
-
-    # 컬럼 이름 재정의
+    
     col_names = ['사용월', '호선명', '역ID', '지하철역']
     for i in range(4, len(df.columns), 2):
         time_str = df.columns[i].split('~')[0][:2]
         col_names.append(f'{time_str}_승차')
         col_names.append(f'{time_str}_하차')
     df.columns = col_names
-
-    # 승하차 인원 데이터에서 쉼표(,) 제거 및 숫자형으로 변환 (안정성 강화)
+    
     value_cols = [c for c in df.columns if '_승차' in c or '_하차' in c]
     for col in value_cols:
         if df[col].dtype == 'object':
             df[col] = pd.to_numeric(df[col].str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         else:
             df[col] = df[col].fillna(0).astype(int)
+    return df
 
-    # Wide to Long 포맷으로 데이터 구조 변경
-    id_vars = ['사용월', '호선명', '역ID', '지하철역']
-    df_long = df.melt(id_vars=id_vars, var_name='시간구분', value_name='인원수')
-    
-    df_long['시간대'] = df_long['시간구분'].str.split('_').str[0]
-    df_long['구분'] = df_long['시간구분'].str.split('_').str[1]
-    df_long = df_long.drop(columns=['시간구분'])
-    
-    # 유사도 분석을 위한 패턴 데이터 생성
-    ride_cols = [c for c in df.columns if '_승차' in c]
-    alight_cols = [c for c in df.columns if '_하차' in c]
-    
-    df_pattern = df.set_index(['호선명', '지하철역'])[ride_cols + alight_cols]
-    df_pattern_normalized = df_pattern.div(df_pattern.sum(axis=1), axis=0).fillna(0)
-    
-    return df_long, df, df_pattern_normalized
+# --- 메인 페이지 UI ---
+st.set_page_config(
+    page_title="서울 지하철 데이터 분석",
+    page_icon="🚇",
+    layout="wide",
+)
 
-# 데이터 로드
-df_long, df_wide, df_pattern_normalized = load_data()
+st.title("🚇 서울 지하철 데이터 분석 대시보드")
+st.markdown("이 대시보드는 서울 지하철의 시간대별 이용 현황 데이터를 시각적으로 분석하고 탐색하기 위해 만들어졌습니다.")
+st.markdown("왼쪽 사이드바 메뉴를 통해 다양한 분석 페이지로 이동할 수 있습니다.")
+st.markdown("---")
 
 
-# 메인 페이지 UI
-if df_long is not None:
-    st.title("🚇 서울 지하철 데이터 분석 대시보드")
-    st.markdown("---")
-    st.markdown("""
-    안녕하세요! 이 대시보드는 서울 지하철의 시간대별 승하차 데이터를 분석하여 다양한 인사이트를 제공합니다.
-    
-    👈 **왼쪽 사이드바에서 원하는 분석 페이지를 선택하세요.**
-    
-    ### 📊 각 페이지 소개
-    
-    1.  **시간대별 혼잡 분석**: 출퇴근 시간 등 특정 시간대를 지정하여 가장 붐비는 역을 승차/하차별로 확인할 수 있습니다.
-    2.  **유동인구 분석**: 전체 또는 특정 호선에서 유동인구(총 승하차 인원)가 가장 많은 역의 순위를 보여줍니다.
-    3.  **패턴 유사역 분석**: 특정 역을 선택하면, 그 역과 시간대별 승하차 패턴이 가장 유사한 역 3곳을 찾아 비교해줍니다.
-    
-    데이터를 기반으로 서울의 심장, 지하철의 움직임을 함께 탐험해봐요!
-    """)
-    
-    st.markdown("---")
-    st.info("데이터는 `지하철데이터.csv` 파일을 기반으로 하며, 모든 분석은 해당 파일의 데이터를 따릅니다.", icon="ℹ️")
+# --- 페이지별 사용 설명서 ---
+st.header("📊 페이지별 사용 설명서")
 
-    # 샘플 데이터 보여주기
-    st.subheader("🔍 원본 데이터 샘플")
-    st.dataframe(df_wide.head())
+st.info("""
+**💡 공통 기능: 동일 역명 데이터 합산**\n
+대부분의 페이지에는 **'동일 역명 데이터 합산'** 체크박스가 있습니다. 
+이 옵션을 선택하면 '강남(2호선)', '강남(신분당선)'처럼 나뉘어 있는 환승역 데이터를 하나의 **'강남 (통합)'** 데이터로 합산하여 분석합니다.
+""")
 
-    # 데이터 다운로드 버튼 추가
+col1, col2, col3 = st.columns(3)
+with col1:
+    with st.container(border=True):
+        st.subheader("1. 시간대별 혼잡 분석")
+        st.markdown("- **무엇을 하나요?**: 특정 시간대를 선택하여 가장 붐비는 역의 순위를 확인합니다.")
+        st.markdown("- **사용 방법**: 슬라이더를 조절해 원하는 시간과 순위(TOP N)를 선택하세요. 승차/하차 인원 그래프가 각각 표시됩니다.")
+
+    with st.container(border=True):
+        st.subheader("2. 유동인구 분석")
+        st.markdown("- **무엇을 하나요?**: 하루 총 승하차 인원이 가장 많은 역의 순위를 확인합니다.")
+        st.markdown("- **사용 방법**: 전체 또는 특정 호선을 선택하고, 슬라이더로 보고 싶은 순위(TOP N)를 조절할 수 있습니다.")
+
+with col2:
+    with st.container(border=True):
+        st.subheader("3. 패턴 유사역 분석")
+        st.markdown("- **무엇을 하나요?**: 특정 역과 시간대별 이용 패턴(하루의 리듬)이 가장 비슷한 역을 찾습니다.")
+        st.markdown("- **사용 방법**: 기준 역, 분석 종류(종합/승차/하차), 비교할 역의 개수(TOP N)를 선택하세요. 인원 비율 패턴을 그래프로 비교하고 유사도 순위를 확인할 수 있습니다.")
+
+    with st.container(border=True):
+        st.subheader("4. 시간대별 전체순위 분석")
+        st.markdown("- **무엇을 하나요?**: 각 시간대의 '챔피언' (가장 이용객이 많은 역)이 어떻게 변하는지 확인합니다.")
+        st.markdown("- **사용 방법**: 막대 또는 꺾은선 그래프를 선택하여 시간의 흐름에 따른 1위 역의 변화를 탐색할 수 있습니다.")
+
+with col3:
+    with st.container(border=True):
+        st.subheader("5. 두 역 비교 분석")
+        st.markdown("- **무엇을 하나요?**: 비교하고 싶은 두 역을 직접 선택하여 시간대별 승하차 인원 추이를 나란히 비교합니다.")
+        st.markdown("- **사용 방법**: 두 개의 선택 상자에서 각각 원하는 역을 고르면, 승차 및 하차 데이터 비교 그래프가 즉시 나타납니다.")
+
+
+# --- 데이터 다운로드 기능 ---
+st.markdown("---")
+st.header("💾 원본 데이터 확인 및 다운로드")
+df = load_data()
+if df is not None:
+    st.dataframe(df.head(10))
+    
+    # 다운로드를 위한 CSV 변환 함수
     @st.cache_data
     def convert_df_to_csv(df):
-        return df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+        return df.to_csv(index=False).encode('utf-8-sig')
 
-    csv_data = convert_df_to_csv(df_wide)
-
+    csv_data = convert_df_to_csv(df)
+    
     st.download_button(
-        label="📊 전처리된 데이터 다운로드 (CSV)",
-        data=csv_data,
-        file_name='seoul_metro_processed.csv',
-        mime='text/csv',
-        help='열 이름 정리, 숫자 형식 변환 등 전처리가 완료된 데이터를 다운로드합니다.'
+       label="📊 전처리된 데이터 다운로드 (CSV)",
+       data=csv_data,
+       file_name='seoul_metro_processed.csv',
+       mime='text/csv',
     )
 
