@@ -108,13 +108,15 @@ if df_long is not None:
         title=f"시간대별 누적 {analysis_type} 인원 TOP {top_n} 레이싱 차트"
     )
 
+    # --- FIX: TOP N 값에 따라 그래프 높이를 동적으로 조절 ---
+    chart_height = top_n * 40 + 150 # 막대 개수에 따라 높이 계산
+
     fig.update_yaxes(categoryorder="total ascending")
     fig.update_layout(
         xaxis_title="누적 인원수",
         yaxis_title="지하철역",
         showlegend=False,
-        height=600,
-        # --- FIX: y축 라벨이 잘리지 않도록 상단 마진 추가 ---
+        height=chart_height, # 동적 높이 적용
         margin=dict(l=0, r=0, t=100, b=20)
     )
     
@@ -123,7 +125,7 @@ if df_long is not None:
     
     if not animation_data.empty:
         max_value = animation_data['누적인원수'].max()
-        fig.update_xaxes(range=[0, max_value * 1.25]) # 텍스트 공간을 위해 여유 공간 추가
+        fig.update_xaxes(range=[0, max_value * 1.25])
     
     fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
 
