@@ -57,10 +57,13 @@ def get_pattern_data(df_clean, combine_stations):
     
     df_wide.fillna(0, inplace=True)
     
-    scaler = MinMaxScaler()
-    df_normalized_data = scaler.fit_transform(df_wide)
-    
-    df_normalized = pd.DataFrame(df_normalized_data, index=df_wide.index, columns=df_wide.columns)
+    # --- FIX: 정규화 방식을 '각 역의 총합으로 나눈 비율'로 변경 ---
+    # 각 역(행)의 총합을 계산합니다.
+    row_sums = df_wide.sum(axis=1)
+    # 총합이 0인 경우 0으로 나누는 것을 방지하기 위해 1로 바꿔줍니다.
+    row_sums[row_sums == 0] = 1
+    # 각 역의 데이터를 해당 역의 총합으로 나누어 비율을 만듭니다.
+    df_normalized = df_wide.div(row_sums, axis=0)
     
     return df_normalized
 
@@ -73,7 +76,6 @@ df_clean = load_and_prep_data()
 if df_clean is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 모든 호선의 데이터를 합산하여 패턴을 분석합니다.")
     
-    # --- NEW: TOP N 선택 슬라이더 추가 ---
     top_n = st.slider("📊 비교할 유사역 개수 (TOP N)", 1, 10, 3, help="비교하고 싶은 상위 유사역의 개수를 선택하세요.")
 
     df_pattern_normalized = get_pattern_data(df_clean.copy(), combine_stations)
