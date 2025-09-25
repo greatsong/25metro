@@ -64,16 +64,15 @@ if df_long is not None:
         total_traffic = df_filtered.groupby(['호선명', '지하철역'])['인원수'].sum().nlargest(top_n).reset_index()
         total_traffic['역명(호선)'] = total_traffic['지하철역'] + "(" + total_traffic['호선명'] + ")"
 
-    # --- FIX: 1위 역 정보 추출 및 표시 ---
+    # 1위 역 정보 추출 및 표시
     if not total_traffic.empty:
-        # 1위 역 정보 추출
         top_station = total_traffic.sort_values(by='인원수', ascending=False).iloc[0]
         st.subheader("🏆 유동인구 최다 역")
         st.metric(
             label=f"**{top_station['역명(호선)']}**",
             value=f"{top_station['인원수']:,} 명"
         )
-        st.markdown("---") # 구분선 추가
+        st.markdown("---")
         
     # 수평 막대 그래프를 위해 오름차순 정렬 (큰 값이 위로)
     total_traffic_sorted_for_plot = total_traffic.sort_values(by='인원수', ascending=True)
@@ -81,7 +80,7 @@ if df_long is not None:
     # 시각화
     st.subheader(f"📈 유동인구 TOP {top_n} 역")
     fig = px.bar(
-        total_traffic_sorted_for_plot, # 정렬된 데이터 사용
+        total_traffic_sorted_for_plot,
         x='인원수',
         y='역명(호선)',
         orientation='h',
@@ -89,6 +88,15 @@ if df_long is not None:
         title='총 승하차 인원수 기준'
     )
     fig.update_traces(texttemplate='%{text:,.0f}명', textposition='outside')
-    fig.update_layout(yaxis_title='지하철역', xaxis_title='총 인원수', yaxis={'categoryorder':'total ascending'})
+    
+    # --- FIX: 가장 긴 막대의 텍스트가 잘리지 않도록 x축 범위 자동 조정 ---
+    if not total_traffic_sorted_for_plot.empty:
+        max_value = total_traffic_sorted_for_plot['인원수'].max()
+        fig.update_layout(
+            yaxis_title='지하철역', 
+            xaxis_title='총 인원수', 
+            yaxis={'categoryorder':'total ascending'},
+            xaxis=dict(range=[0, max_value * 1.15]) # x축 범위에 15% 여유 공간 추가
+        )
     st.plotly_chart(fig, use_container_width=True)
 
