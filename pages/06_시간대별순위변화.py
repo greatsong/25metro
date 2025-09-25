@@ -55,6 +55,13 @@ if df_long is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 환승역 데이터를 합산하여 분석합니다.")
     analysis_type = st.radio("📈 분석 기준 선택", ('종합', '승차', '하차'), horizontal=True)
     top_n = st.slider("📊 표시할 순위 (TOP N)", 5, 20, 10)
+    
+    # --- NEW: 애니메이션 속도 조절 슬라이더 추가 ---
+    animation_speed = st.slider(
+        "💨 애니메이션 속도 조절 (ms)",
+        min_value=100, max_value=1000, value=300, step=50,
+        help="프레임 전환 속도입니다. 값이 낮을수록 빨라집니다."
+    )
 
     # 분석 기준에 따라 데이터 필터링
     if analysis_type != '종합':
@@ -102,13 +109,11 @@ if df_long is not None:
         yaxis_title="지하철역",
         showlegend=False,
         height=600,
-        # --- FIX: 중복되는 커스텀 Play 버튼 제거 ---
-        # Plotly 기본 컨트롤러 사용
     )
     
-    # 애니메이션 속도 조절
-    fig.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = 300
-    fig.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = 100
+    # --- FIX: 슬라이더 값으로 애니메이션 속도 조절 ---
+    fig.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = animation_speed
+    fig.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = int(animation_speed * 0.3) # 전환 효과는 더 빠르게
     
     max_value = animation_data['누적인원수'].max()
     fig.update_xaxes(range=[0, max_value * 1.2])
