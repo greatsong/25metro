@@ -127,12 +127,19 @@ if df_clean is not None:
 
     plot_df = df_pattern_normalized.loc[stations_to_plot].T.reset_index()
     
-    # --- FIX: reset_index()로 생성된 첫 번째 열을 안정적으로 '시간구분'으로 변경 ---
+    # --- FIX: 컬럼 이름 변경 로직 수정 ---
+    # 첫 번째 열을 '시간구분'으로 안정적으로 변경
     plot_df = plot_df.rename(columns={plot_df.columns[0]: '시간구분'})
 
+    # '합산' 모드가 아닐 때 (열 이름이 튜플일 때)
     if not combine_stations:
-        display_names = {col: f"{col[1]} ({col[0]})" for col in plot_df.columns if isinstance(col, tuple)}
-        plot_df = plot_df.rename(columns=display_names)
+        # 새로운 컬럼 이름 리스트를 생성 (첫번째는 '시간구분')
+        new_columns = ['시간구분']
+        # 두 번째 열부터 순회하며 튜플을 문자열로 변환
+        for col in plot_df.columns[1:]:
+            new_columns.append(f"{col[1]} ({col[0]})")
+        # 데이터프레임의 컬럼을 새로운 리스트로 지정
+        plot_df.columns = new_columns
     
     plot_df_long = plot_df.melt(
         id_vars='시간구분',
