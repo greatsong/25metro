@@ -42,12 +42,12 @@ def load_and_prep_data():
     df_long = df_long.drop(columns=['시간구분'])
     return df_long
 
-# 무거운 계산을 위한 별도의 캐시 함수
+# --- FIX: 모든 무거운 계산을 하나의 캐시 함수로 통합 ---
 @st.cache_data
-def get_cumulative_data(df_long, combine_stations, analysis_type):
+def get_animation_data(df_long, combine_stations, analysis_type, top_n):
     """
-    선택된 옵션에 따라 데이터를 그룹화하고 누적 합계를 계산합니다.
-    이 함수는 옵션이 변경될 때만 재실행됩니다.
+    선택된 옵션에 따라 최종 애니메이션 데이터를 생성합니다.
+    이 함수는 top_n을 포함한 주요 옵션이 변경될 때만 재실행됩니다.
     """
     if analysis_type != '종합':
         df_filtered = df_long[df_long['구분'] == analysis_type]
@@ -66,7 +66,13 @@ def get_cumulative_data(df_long, combine_stations, analysis_type):
     grouped = grouped.sort_values(['역명(호선)', '시간대'])
 
     grouped['누적인원수'] = grouped.groupby('역명(호선)')['인원수'].cumsum()
-    return grouped
+    
+    # 애니메이션 데이터 생성 로직
+    top_n_per_slot = grouped.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
+    all_top_stations = top_n_per_slot['역명(호선)'].unique()
+    
+    animation_data = grouped[grouped['역명(호선)'].isin(all_top_stations)]
+    return animation_data
 
 # --- 앱 UI 부분 ---
 st.header("🏁 시간대별 누적 유동인구 레이싱 차트")
@@ -84,14 +90,8 @@ if df_long is not None:
         help="프레임 전환 속도입니다. 값이 낮을수록 빨라집니다."
     )
 
-    # 무거운 계산은 캐시된 함수를 통해 수행
-    cumulative_data = get_cumulative_data(df_long, combine_stations, analysis_type)
-
-    # 애니메이션 데이터 생성 로직
-    top_n_per_slot = cumulative_data.groupby('시간대').apply(lambda x: x.nlargest(top_n, '누적인원수')).reset_index(drop=True)
-    all_top_stations = top_n_per_slot['역명(호선)'].unique()
-    
-    animation_data = cumulative_data[cumulative_data['역명(호선)'].isin(all_top_stations)]
+    # 모든 데이터 처리를 하나의 캐시 함수로 통합하여 호출
+    animation_data = get_animation_data(df_long, combine_stations, analysis_type, top_n)
 
     st.markdown("---")
     st.info("▶️ 아래 그래프의 재생 버튼을 눌러 시간대별 **누적** 순위 변화를 확인하세요!")
@@ -108,15 +108,14 @@ if df_long is not None:
         title=f"시간대별 누적 {analysis_type} 인원 TOP {top_n} 레이싱 차트"
     )
 
-    # --- FIX: TOP N 값에 따라 그래프 높이를 동적으로 조절 ---
-    chart_height = top_n * 40 + 150 # 막대 개수에 따라 높이 계산
+    chart_height = top_n * 40 + 150
 
     fig.update_yaxes(categoryorder="total ascending")
     fig.update_layout(
         xaxis_title="누적 인원수",
         yaxis_title="지하철역",
         showlegend=False,
-        height=chart_height, # 동적 높이 적용
+        height=chart_height,
         margin=dict(l=0, r=0, t=100, b=20)
     )
     
