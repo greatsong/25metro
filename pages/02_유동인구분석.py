@@ -74,13 +74,10 @@ if df_long is not None:
         )
         st.markdown("---")
         
-    # 수평 막대 그래프를 위해 오름차순 정렬 (큰 값이 위로)
-    total_traffic_sorted_for_plot = total_traffic.sort_values(by='인원수', ascending=True)
-    
     # 시각화
     st.subheader(f"📈 유동인구 TOP {top_n} 역")
     fig = px.bar(
-        total_traffic_sorted_for_plot,
+        total_traffic,
         x='인원수',
         y='역명(호선)',
         orientation='h',
@@ -89,14 +86,19 @@ if df_long is not None:
     )
     fig.update_traces(texttemplate='%{text:,.0f}명', textposition='outside')
     
-    # --- FIX: 가장 긴 막대의 텍스트가 잘리지 않도록 x축 범위 자동 조정 ---
-    if not total_traffic_sorted_for_plot.empty:
-        max_value = total_traffic_sorted_for_plot['인원수'].max()
+    # --- FIX: 렌더링 문제를 해결하기 위한 레이아웃 최종 수정 ---
+    if not total_traffic.empty:
+        max_value = total_traffic['인원수'].max()
+        # N 값에 따라 차트 높이를 동적으로 조절
+        chart_height = top_n * 35 + 120 
+        
         fig.update_layout(
+            height=chart_height,
             yaxis_title='지하철역', 
             xaxis_title='총 인원수', 
             yaxis={'categoryorder':'total ascending'},
-            xaxis=dict(range=[0, max_value * 1.15]) # x축 범위에 15% 여유 공간 추가
+            xaxis=dict(range=[0, max_value * 1.20]), # 텍스트 표시를 위한 x축 여유 공간 확보
+            margin=dict(l=0, r=0, t=50, b=20) # 상단 마진 확보, 좌우 마진 최소화
         )
     st.plotly_chart(fig, use_container_width=True)
 
