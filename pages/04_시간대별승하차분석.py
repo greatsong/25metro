@@ -53,10 +53,9 @@ df_long = load_and_prep_data()
 
 if df_long is not None:
     combine_stations = st.checkbox("🔁 동일 역명 데이터 합산", help="체크 시, 환승역 데이터를 합산하여 분석합니다.")
-    chart_type = st.radio("📈 그래프 종류 선택", ('막대 그래프', '꺾은선 그래프'), horizontal=True)
     
     show_line_contribution = False
-    if combine_stations and chart_type == '막대 그래프':
+    if combine_stations:
         show_line_contribution = st.checkbox("📊 호선별 구성 보기 (스택 그래프)", help="체크 시, 1위 역의 총 이용객이 각 호선별로 얼마나 구성되는지 보여줍니다.")
 
     st.markdown("---")
@@ -85,7 +84,7 @@ if df_long is not None:
         data_ride = (top_stations_by_time_combined if combine_stations else top_stations_by_time_individual).copy()
         data_ride = data_ride[data_ride['구분'] == '승차']
 
-        # --- FIX: 데이터 자체에 시간 순서를 명확하게 정의 ---
+        # 데이터 자체에 시간 순서를 명확하게 정의
         data_ride['시간대'] = pd.Categorical(data_ride['시간대'], categories=time_slots, ordered=True)
         data_ride = data_ride.sort_values('시간대')
 
@@ -99,18 +98,12 @@ if df_long is not None:
                 title='시간대별 최다 승차역 (호선별 구성)'
             )
             fig_ride.update_traces(textposition='outside')
-        elif chart_type == '막대 그래프':
+        else:
             fig_ride = px.bar(
                 data_ride, x='시간대', y='인원수', color='역명(호선)', text='지하철역',
                 title='시간대별 최다 승차역'
             )
             fig_ride.update_traces(textposition='outside')
-        else: # 꺾은선 그래프
-            fig_ride = px.line(
-                data_ride, x='시간대', y='인원수', markers=True, text='역명(호선)', color='역명(호선)',
-                title='시간대별 최다 승차역'
-            )
-            fig_ride.update_traces(textposition='top center', textfont_size=10)
         st.plotly_chart(fig_ride, use_container_width=True)
 
     with col2:
@@ -118,7 +111,7 @@ if df_long is not None:
         data_alight = (top_stations_by_time_combined if combine_stations else top_stations_by_time_individual).copy()
         data_alight = data_alight[data_alight['구분'] == '하차']
 
-        # --- FIX: 데이터 자체에 시간 순서를 명확하게 정의 ---
+        # 데이터 자체에 시간 순서를 명확하게 정의
         data_alight['시간대'] = pd.Categorical(data_alight['시간대'], categories=time_slots, ordered=True)
         data_alight = data_alight.sort_values('시간대')
 
@@ -132,17 +125,11 @@ if df_long is not None:
                 title='시간대별 최다 하차역 (호선별 구성)'
             )
             fig_alight.update_traces(textposition='outside')
-        elif chart_type == '막대 그래프':
+        else:
             fig_alight = px.bar(
                 data_alight, x='시간대', y='인원수', color='역명(호선)', text='지하철역',
                 title='시간대별 최다 하차역'
             )
             fig_alight.update_traces(textposition='outside')
-        else: # 꺾은선 그래프
-            fig_alight = px.line(
-                data_alight, x='시간대', y='인원수', markers=True, text='역명(호선)', color='역명(호선)',
-                title='시간대별 최다 하차역'
-            )
-            fig_alight.update_traces(textposition='top center', textfont_size=10)
         st.plotly_chart(fig_alight, use_container_width=True)
 
