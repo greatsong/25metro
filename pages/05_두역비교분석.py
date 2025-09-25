@@ -85,12 +85,11 @@ if df_clean is not None:
         station1_display_name = f"{station1_tuple[1]} ({station1_tuple[0]})"
         station2_display_name = f"{station2_tuple[1]} ({station2_tuple[0]})"
 
-    # --- FIX: 시간 순서를 올바르게 정의 ---
+    # 시간 순서를 올바르게 정의
     time_slots = [f"{h:02d}" for h in range(4, 24)] + ["00", "01"]
     
     data_to_plot = []
     for t in time_slots:
-        # 키가 없는 경우를 대비해 .get() 사용
         s1_ride = station1_data.get(f'{t}_승차', 0)
         s1_alight = station1_data.get(f'{t}_하차', 0)
         s2_ride = station2_data.get(f'{t}_승차', 0)
@@ -107,31 +106,27 @@ if df_clean is not None:
 
     with col1:
         st.subheader("🔼 승차 인원 비교")
-        fig_ride = px.line(
+        fig_ride = px.bar(
             plot_df,
             x='시간대',
             y='승차인원',
             color='역 정보',
-            markers=True,
-            title='시간대별 승차 인원',
-            # --- FIX: x축 순서를 시간 흐름에 맞게 지정 ---
-            category_orders={"시간대": time_slots}
+            barmode='group', # 막대를 그룹으로 묶어 옆으로 나란히 표시
+            title='시간대별 승차 인원'
         )
-        fig_ride.update_layout(xaxis_title="시간", yaxis_title="승차 인원수")
+        fig_ride.update_layout(xaxis_title="시간", yaxis_title="승차 인원수", xaxis={'categoryorder':'array', 'categoryarray': time_slots})
         st.plotly_chart(fig_ride, use_container_width=True)
 
     with col2:
         st.subheader("🔽 하차 인원 비교")
-        fig_alight = px.line(
+        fig_alight = px.bar(
             plot_df,
             x='시간대',
             y='하차인원',
             color='역 정보',
-            markers=True,
-            title='시간대별 하차 인원',
-            # --- FIX: x축 순서를 시간 흐름에 맞게 지정 ---
-            category_orders={"시간대": time_slots}
+            barmode='group', # 막대를 그룹으로 묶어 옆으로 나란히 표시
+            title='시간대별 하차 인원'
         )
-        fig_alight.update_layout(xaxis_title="시간", yaxis_title="하차 인원수")
+        fig_alight.update_layout(xaxis_title="시간", yaxis_title="하차 인원수", xaxis={'categoryorder':'array', 'categoryarray': time_slots})
         st.plotly_chart(fig_alight, use_container_width=True)
 
