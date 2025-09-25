@@ -52,29 +52,25 @@ if df_clean is not None:
     if combine_stations:
         station_list = sorted(df_clean['지하철역'].unique())
         
-        # --- FIX: 기본 선택 역을 데이터에 존재하는 값으로 안전하게 설정 ---
         if len(station_list) > 1:
             default_index_1 = 0
             default_index_2 = 1
-        else: # 데이터에 역이 하나뿐인 경우
+        else:
             default_index_1 = 0
             default_index_2 = 0
             
         station1_name = st.selectbox("첫 번째 역을 선택하세요.", station_list, index=default_index_1)
         station2_name = st.selectbox("두 번째 역을 선택하세요.", station_list, index=default_index_2)
 
-        # 데이터 집계
         station1_data = df_clean[df_clean['지하철역'] == station1_name].sum(numeric_only=True)
         station2_data = df_clean[df_clean['지하철역'] == station2_name].sum(numeric_only=True)
         
-        # 역 이름 포맷팅
         station1_display_name = f"{station1_name} (통합)"
         station2_display_name = f"{station2_name} (통합)"
 
     else:
         station_list = sorted(list(zip(df_clean['호선명'], df_clean['지하철역'])), key=lambda x: (x[1], x[0]))
         
-        # --- FIX: 기본 선택 역을 데이터에 존재하는 값으로 안전하게 설정 ---
         default_station_1 = ('2호선', '강남')
         default_station_2 = ('2호선', '홍대입구')
         default_index_1 = station_list.index(default_station_1) if default_station_1 in station_list else 0
@@ -83,27 +79,30 @@ if df_clean is not None:
         station1_tuple = st.selectbox("첫 번째 역을 선택하세요.", station_list, index=default_index_1, format_func=lambda x: f"{x[1]} ({x[0]})")
         station2_tuple = st.selectbox("두 번째 역을 선택하세요.", station_list, index=default_index_2, format_func=lambda x: f"{x[1]} ({x[0]})")
         
-        # 데이터 추출
         station1_data = df_clean[(df_clean['호선명'] == station1_tuple[0]) & (df_clean['지하철역'] == station1_tuple[1])].iloc[0]
         station2_data = df_clean[(df_clean['호선명'] == station2_tuple[0]) & (df_clean['지하철역'] == station2_tuple[1])].iloc[0]
 
-        # 역 이름 포맷팅
         station1_display_name = f"{station1_tuple[1]} ({station1_tuple[0]})"
         station2_display_name = f"{station2_tuple[1]} ({station2_tuple[0]})"
 
-    # 그래프용 데이터프레임 생성
+    # --- FIX: 시간 순서를 올바르게 정의 ---
     time_slots = [f"{h:02d}" for h in range(4, 24)] + ["00", "01"]
     
     data_to_plot = []
     for t in time_slots:
-        data_to_plot.append([t, station1_data[f'{t}_승차'], station1_data[f'{t}_하차'], station1_display_name])
-        data_to_plot.append([t, station2_data[f'{t}_승차'], station2_data[f'{t}_하차'], station2_display_name])
+        # 키가 없는 경우를 대비해 .get() 사용
+        s1_ride = station1_data.get(f'{t}_승차', 0)
+        s1_alight = station1_data.get(f'{t}_하차', 0)
+        s2_ride = station2_data.get(f'{t}_승차', 0)
+        s2_alight = station2_data.get(f'{t}_하차', 0)
+        
+        data_to_plot.append([t, s1_ride, s1_alight, station1_display_name])
+        data_to_plot.append([t, s2_ride, s2_alight, station2_display_name])
 
     plot_df = pd.DataFrame(data_to_plot, columns=['시간대', '승차인원', '하차인원', '역 정보'])
 
     st.markdown("---")
 
-    # 두 개의 컬럼으로 나누어 그래프 표시
     col1, col2 = st.columns(2)
 
     with col1:
@@ -114,7 +113,9 @@ if df_clean is not None:
             y='승차인원',
             color='역 정보',
             markers=True,
-            title='시간대별 승차 인원'
+            title='시간대별 승차 인원',
+            # --- FIX: x축 순서를 시간 흐름에 맞게 지정 ---
+            category_orders={"시간대": time_slots}
         )
         fig_ride.update_layout(xaxis_title="시간", yaxis_title="승차 인원수")
         st.plotly_chart(fig_ride, use_container_width=True)
@@ -127,7 +128,9 @@ if df_clean is not None:
             y='하차인원',
             color='역 정보',
             markers=True,
-            title='시간대별 하차 인원'
+            title='시간대별 하차 인원',
+            # --- FIX: x축 순서를 시간 흐름에 맞게 지정 ---
+            category_orders={"시간대": time_slots}
         )
         fig_alight.update_layout(xaxis_title="시간", yaxis_title="하차 인원수")
         st.plotly_chart(fig_alight, use_container_width=True)
