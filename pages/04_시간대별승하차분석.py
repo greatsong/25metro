@@ -55,12 +55,24 @@ st.title("⏰ 시간대별 최다 이용역 분석")
 st.markdown("각 시간대별로 승차 또는 하차 인원이 가장 많았던 역은 어디일까요? 시간의 흐름에 따른 '최고의 역'들을 확인해보세요.")
 
 if df_long is not None:
-    # 시간대별 승/하차 인원 1위 역 찾기
-    top_stations_by_time = df_long.loc[df_long.groupby(['시간대', '구분'])['인원수'].idxmax()]
-    top_stations_by_time['역명(호선)'] = top_stations_by_time['지하철역'] + "(" + top_stations_by_time['호선명'] + ")"
+    # --- 기능 추가: 동일 역명 데이터 합산 옵션 ---
+    combine_stations = st.checkbox(
+        "🔁 동일 역명 데이터 합산하여 보기",
+        help="체크 시, '서울역(1호선)', '서울역(4호선)' 등을 '서울역 (통합)'으로 합산하여 분석합니다."
+    )
+
+    if combine_stations:
+        # 합산 로직: 역명 기준으로 인원수 합산 후 1위 찾기
+        grouped_df = df_long.groupby(['시간대', '구분', '지하철역'])['인원수'].sum().reset_index()
+        top_stations_by_time = grouped_df.loc[grouped_df.groupby(['시간대', '구분'])['인원수'].idxmax()]
+        top_stations_by_time['역명(호선)'] = top_stations_by_time['지하철역'] + " (통합)"
+    else:
+        # 기존 로직: 개별 호선 기준 1위 찾기
+        top_stations_by_time = df_long.loc[df_long.groupby(['시간대', '구분'])['인원수'].idxmax()]
+        top_stations_by_time['역명(호선)'] = top_stations_by_time['지하철역'] + "(" + top_stations_by_time['호선명'] + ")"
+
+    # 공통 로직
     top_stations_by_time = top_stations_by_time.sort_values(by='시간대')
-    
-    # 승차/하차 데이터 분리
     top_ride = top_stations_by_time[top_stations_by_time['구분'] == '승차']
     top_alight = top_stations_by_time[top_stations_by_time['구분'] == '하차']
 
@@ -133,3 +145,4 @@ if df_long is not None:
             fig_alight.update_traces(textposition='top center', textfont_size=10)
             
         st.plotly_chart(fig_alight, use_container_width=True)
+
