@@ -4,6 +4,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import folium
+from folium.plugins import HeatMap, MarkerCluster
+from streamlit_folium import st_folium
 
 # 페이지 설정
 st.set_page_config(page_title="서울 지하철 승하차 분석", layout="wide", page_icon="🚇")
@@ -40,6 +43,29 @@ def load_data():
     
     return df, time_slots
 
+@st.cache_data
+def load_coordinates():
+    """역 좌표 데이터 로드"""
+    try:
+        # EUC-KR 인코딩으로 시도
+        coord_df = pd.read_csv('서울시 역사마스터 정보.csv', encoding='euc-kr')
+        
+        # 컬럼명이 한글로 제대로 읽혔는지 확인하고 표준화
+        coord_df.columns = ['역사_ID', '역사명', '호선', '위도', '경도']
+        
+        return coord_df
+    except:
+        try:
+            # CP949로 시도
+            coord_df = pd.read_csv('서울시 역사마스터 정보.csv', encoding='cp949')
+            coord_df.columns = ['역사_ID', '역사명', '호선', '위도', '경도']
+            return coord_df
+        except:
+            # UTF-8로 시도
+            coord_df = pd.read_csv('서울시 역사마스터 정보.csv', encoding='utf-8')
+            coord_df.columns = ['역사_ID', '역사명', '호선', '위도', '경도']
+            return coord_df
+
 # 환승역 데이터 생성 함수
 @st.cache_data
 def create_merged_station_data(df, time_slots):
@@ -66,9 +92,49 @@ def create_merged_station_data(df, time_slots):
     
     return pd.DataFrame(merged_data)
 
+@st.cache_data
+def merge_with_coordinates(station_df, coord_df, time_slots):
+    """역 이용 데이터와 좌표 데이터 병합"""
+    # 좌표 데이터의 역명 정리
+    coord_df['역사명_clean'] = coord_df['역사명'].str.strip()
+    
+    # 역별 총 이용객 계산
+    result_data = []
+    for idx, row in station_df.iterrows():
+        station_name = row['지하철역']
+        
+        # 좌표 찾기 (역명으로 매칭)
+        coord_match = coord_df[coord_df['역사명_clean'] == station_name]
+        
+        if not coord_match.empty:
+            # 여러 개가 매칭되면 첫 번째 사용
+            coord = coord_match.iloc[0]
+            
+            total_board = sum(row[f'{time}_승차'] for time in time_slots)
+            total_alight = sum(row[f'{time}_하차'] for time in time_slots)
+            total_users = total_board + total_alight
+            
+            board_ratio = (total_board / total_users * 100) if total_users > 0 else 50
+            
+            result_data.append({
+                '역명': station_name,
+                '호선': row.get('호선', row.get('호선명', '')),
+                '위도': coord['위도'],
+                '경도': coord['경도'],
+                '승차': total_board,
+                '하차': total_alight,
+                '총이용': total_users,
+                '승차비율': board_ratio,
+                '특성': '주거지역' if board_ratio > 55 else ('업무지역' if board_ratio < 45 else '균형'),
+                '환승역여부': row.get('환승역여부', '일반역')
+            })
+    
+    return pd.DataFrame(result_data)
+
 # 데이터 로드
 df, time_slots = load_data()
 merged_df = create_merged_station_data(df, time_slots)
+coord_df = load_coordinates()
 
 # 사이드바 필터
 st.sidebar.header("🔍 필터 옵션")
@@ -122,13 +188,14 @@ else:
     selected_station = st.sidebar.selectbox("역 선택 (상세 분석용)", ['전체'] + stations)
 
 # 메인 대시보드
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 전체 현황", 
     "⏰ 시간대별 분석", 
     "🏆 역별 순위", 
     "🔄 승하차 불균형",
     "🔀 환승역 분석",
-    "🗺️ 히트맵"
+    "🗺️ 지도 시각화",
+    "📈 히트맵"
 ])
 
 # Tab 1: 전체 현황
@@ -236,7 +303,6 @@ with tab2:
     
     if selected_station != '전체':
         if data_mode == "호선별 개별":
-            # 특정 역의 특정 호선 시간대별 패턴
             station_df = filtered_df[
                 (filtered_df['지하철역'] == selected_station) & 
                 (filtered_df['호선명'] == selected_station_line)
@@ -253,7 +319,6 @@ with tab2:
             
             st.markdown(f"### 📍 {selected_station}역 ({selected_station_line}) 시간대별 패턴")
         else:
-            # 역명 통합 모드
             station_df = filtered_df[filtered_df['지하철역'] == selected_station].iloc[0]
             
             hourly_data = []
@@ -289,7 +354,6 @@ with tab2:
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        # 주요 통계
         col1, col2, col3 = st.columns(3)
         
         peak_board_time = hourly_df.loc[hourly_df['승차'].idxmax(), '시간대']
@@ -304,7 +368,6 @@ with tab2:
         col3.metric("월 총 이용", f"{total_station:,.0f}명")
         
     else:
-        # 전체 시간대별 패턴
         hourly_totals = []
         for time in time_slots:
             board = filtered_df[f'{time}_승차'].sum()
@@ -335,7 +398,6 @@ with tab2:
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        # 출퇴근 시간대 분석
         st.markdown("### 🚶 출퇴근 시간대 특성")
         col1, col2 = st.columns(2)
         
@@ -357,7 +419,6 @@ with tab2:
 with tab3:
     st.subheader("🏆 역별 이용 순위")
     
-    # 역별 통계 계산
     station_stats = []
     for idx, row in filtered_df.iterrows():
         total_board = sum(row[f'{time}_승차'] for time in time_slots)
@@ -380,7 +441,6 @@ with tab3:
     
     station_stats_df = pd.DataFrame(station_stats).sort_values('총 이용', ascending=False)
     
-    # Top/Bottom 선택
     rank_type = st.radio("순위 유형", ['Top 20 (이용 많은 역)', 'Bottom 20 (이용 적은 역)'], horizontal=True)
     
     if rank_type == 'Top 20 (이용 많은 역)':
@@ -420,7 +480,6 @@ with tab4:
     st.subheader("🔄 승하차 불균형 분석")
     st.markdown("출근지와 주거지의 특성을 파악할 수 있습니다.")
     
-    # 승하차 비율 계산
     imbalance_stats = []
     for idx, row in filtered_df.iterrows():
         total_board = sum(row[f'{time}_승차'] for time in time_slots)
@@ -450,7 +509,6 @@ with tab4:
     
     imbalance_df = pd.DataFrame(imbalance_stats)
     
-    # 특성별 분류
     col1, col2, col3 = st.columns(3)
     
     residence = len(imbalance_df[imbalance_df['특성'] == '주거지역'])
@@ -461,7 +519,6 @@ with tab4:
     col2.metric("🏢 업무지역 특성", f"{business}개역", "하차 > 승차")
     col3.metric("⚖️ 균형 지역", f"{balanced}개역", "승차 ≈ 하차")
     
-    # 산점도
     fig = px.scatter(imbalance_df, x='승차', y='하차',
                     color='특성',
                     hover_data=['역명', '호선'],
@@ -470,7 +527,6 @@ with tab4:
                     size='불균형도',
                     size_max=20)
     
-    # 대각선 추가 (균형선)
     max_val = max(imbalance_df['승차'].max(), imbalance_df['하차'].max())
     fig.add_trace(go.Scatter(x=[0, max_val], y=[0, max_val],
                             mode='lines',
@@ -480,7 +536,6 @@ with tab4:
     fig.update_layout(height=600)
     st.plotly_chart(fig, use_container_width=True)
     
-    # 주요 역 표시
     col1, col2 = st.columns(2)
     
     with col1:
@@ -493,14 +548,12 @@ with tab4:
         business_top = imbalance_df[imbalance_df['특성'] == '업무지역'].nsmallest(10, '승차비율')
         st.dataframe(business_top[['역명', '호선', '승차비율']].style.format({'승차비율': '{:.1f}%'}))
 
-# Tab 5: 환승역 분석 (새로운 탭)
+# Tab 5: 환승역 분석
 with tab5:
     st.subheader("🔀 환승역 심층 분석")
     
-    # 환승역 통계
     transfer_stations = merged_df[merged_df['환승역여부'] == '환승역'].copy()
     
-    # 환승역별 총 이용객 계산
     transfer_stats = []
     for idx, row in transfer_stations.iterrows():
         total_board = sum(row[f'{time}_승차'] for time in time_slots)
@@ -514,7 +567,6 @@ with tab5:
     
     transfer_stats_df = pd.DataFrame(transfer_stats).sort_values('총 이용', ascending=False)
     
-    # 상단 메트릭
     col1, col2, col3, col4 = st.columns(4)
     
     total_transfer = len(transfer_stations)
@@ -533,7 +585,6 @@ with tab5:
     
     st.markdown("---")
     
-    # 환승역 Top 20
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -568,10 +619,8 @@ with tab5:
         display_detail['총 이용'] = display_detail['총 이용'].apply(lambda x: f"{x:,.0f}")
         st.dataframe(display_detail[['역명', '호선수', '호선', '총 이용']], height=300)
     
-    # 호선별 환승역 네트워크
     st.markdown("### 🗺️ 환승 가능 호선 조합")
     
-    # 호선 조합 빈도 분석
     line_combinations = transfer_stations['호선'].value_counts().head(15)
     
     fig = px.bar(x=line_combinations.values, y=line_combinations.index,
@@ -583,14 +632,186 @@ with tab5:
     fig.update_layout(height=500, showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
-# Tab 6: 히트맵
+# Tab 6: 지도 시각화 (새로운 탭)
 with tab6:
-    st.subheader("🗺️ 시간대별 역 이용 히트맵")
+    st.subheader("🗺️ 서울 지하철 지도 시각화")
     
-    # 승차/하차 선택
+    # 좌표와 병합
+    map_data = merge_with_coordinates(filtered_df, coord_df, time_slots)
+    
+    if len(map_data) == 0:
+        st.warning("⚠️ 좌표 데이터와 매칭되는 역이 없습니다. 역명이 정확히 일치하는지 확인해주세요.")
+    else:
+        st.success(f"✅ 총 {len(map_data)}개 역의 위치 정보를 찾았습니다!")
+        
+        # 지도 옵션
+        map_type = st.radio(
+            "지도 유형",
+            ["🔴 이용객 규모", "🎨 승하차 특성", "🔥 히트맵"],
+            horizontal=True
+        )
+        
+        # 서울 중심 좌표
+        seoul_center = [37.5665, 126.9780]
+        
+        if map_type == "🔴 이용객 규모":
+            st.markdown("### 역별 이용객 규모 (원의 크기 = 이용객 수)")
+            
+            # Folium 지도 생성
+            m = folium.Map(
+                location=seoul_center,
+                zoom_start=11,
+                tiles='OpenStreetMap'
+            )
+            
+            # 이용객 수에 따라 원 크기 조절
+            max_users = map_data['총이용'].max()
+            
+            for idx, row in map_data.iterrows():
+                # 원 반지름 계산 (최소 50, 최대 500)
+                radius = 50 + (row['총이용'] / max_users) * 450
+                
+                # 환승역 여부에 따라 색상 변경
+                color = '#FF6B6B' if row['환승역여부'] == '환승역' else '#4ECDC4'
+                
+                popup_text = f"""
+                <div style="font-family: Arial; min-width: 200px;">
+                    <h4 style="margin: 0;">{row['역명']}</h4>
+                    <p style="margin: 5px 0;"><b>호선:</b> {row['호선']}</p>
+                    <p style="margin: 5px 0;"><b>총 이용:</b> {row['총이용']:,.0f}명</p>
+                    <p style="margin: 5px 0;"><b>승차:</b> {row['승차']:,.0f}명</p>
+                    <p style="margin: 5px 0;"><b>하차:</b> {row['하차']:,.0f}명</p>
+                    <p style="margin: 5px 0;"><b>특성:</b> {row['특성']}</p>
+                </div>
+                """
+                
+                folium.CircleMarker(
+                    location=[row['위도'], row['경도']],
+                    radius=radius / 30,  # 화면에 맞게 스케일 조정
+                    popup=folium.Popup(popup_text, max_width=300),
+                    color=color,
+                    fill=True,
+                    fillColor=color,
+                    fillOpacity=0.6,
+                    weight=2
+                ).add_to(m)
+            
+            # 범례 추가
+            legend_html = '''
+            <div style="position: fixed; 
+                        bottom: 50px; right: 50px; width: 180px; height: 90px; 
+                        background-color: white; border:2px solid grey; z-index:9999; 
+                        font-size:14px; padding: 10px">
+                <p style="margin: 5px;"><span style="color: #FF6B6B;">●</span> 환승역</p>
+                <p style="margin: 5px;"><span style="color: #4ECDC4;">●</span> 일반역</p>
+                <p style="margin: 5px; font-size: 12px;">원의 크기 = 이용객 수</p>
+            </div>
+            '''
+            m.get_root().html.add_child(folium.Element(legend_html))
+            
+            st_folium(m, width=1400, height=700)
+            
+        elif map_type == "🎨 승하차 특성":
+            st.markdown("### 역별 승하차 특성 (주거지역 vs 업무지역)")
+            
+            m = folium.Map(
+                location=seoul_center,
+                zoom_start=11,
+                tiles='OpenStreetMap'
+            )
+            
+            max_users = map_data['총이용'].max()
+            
+            for idx, row in map_data.iterrows():
+                radius = 50 + (row['총이용'] / max_users) * 450
+                
+                # 특성에 따라 색상 변경
+                if row['특성'] == '주거지역':
+                    color = '#FF6B6B'
+                elif row['특성'] == '업무지역':
+                    color = '#4ECDC4'
+                else:
+                    color = '#95E1D3'
+                
+                popup_text = f"""
+                <div style="font-family: Arial; min-width: 200px;">
+                    <h4 style="margin: 0;">{row['역명']}</h4>
+                    <p style="margin: 5px 0;"><b>호선:</b> {row['호선']}</p>
+                    <p style="margin: 5px 0;"><b>특성:</b> {row['특성']}</p>
+                    <p style="margin: 5px 0;"><b>승차비율:</b> {row['승차비율']:.1f}%</p>
+                    <p style="margin: 5px 0;"><b>총 이용:</b> {row['총이용']:,.0f}명</p>
+                </div>
+                """
+                
+                folium.CircleMarker(
+                    location=[row['위도'], row['경도']],
+                    radius=radius / 30,
+                    popup=folium.Popup(popup_text, max_width=300),
+                    color=color,
+                    fill=True,
+                    fillColor=color,
+                    fillOpacity=0.7,
+                    weight=2
+                ).add_to(m)
+            
+            legend_html = '''
+            <div style="position: fixed; 
+                        bottom: 50px; right: 50px; width: 180px; height: 110px; 
+                        background-color: white; border:2px solid grey; z-index:9999; 
+                        font-size:14px; padding: 10px">
+                <p style="margin: 5px;"><span style="color: #FF6B6B;">●</span> 주거지역</p>
+                <p style="margin: 5px;"><span style="color: #4ECDC4;">●</span> 업무지역</p>
+                <p style="margin: 5px;"><span style="color: #95E1D3;">●</span> 균형지역</p>
+                <p style="margin: 5px; font-size: 12px;">원의 크기 = 이용객 수</p>
+            </div>
+            '''
+            m.get_root().html.add_child(folium.Element(legend_html))
+            
+            st_folium(m, width=1400, height=700)
+            
+        else:  # 히트맵
+            st.markdown("### 지하철 이용 밀집도 히트맵")
+            
+            m = folium.Map(
+                location=seoul_center,
+                zoom_start=11,
+                tiles='OpenStreetMap'
+            )
+            
+            # 히트맵 데이터 준비
+            heat_data = [[row['위도'], row['경도'], row['총이용']] for idx, row in map_data.iterrows()]
+            
+            # 히트맵 추가
+            HeatMap(
+                heat_data,
+                min_opacity=0.3,
+                max_zoom=18,
+                radius=25,
+                blur=35,
+                gradient={0.4: 'blue', 0.6: 'lime', 0.8: 'yellow', 1.0: 'red'}
+            ).add_to(m)
+            
+            st_folium(m, width=1400, height=700)
+        
+        # 통계
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        
+        top_station = map_data.nlargest(1, '총이용').iloc[0]
+        col1.metric("🥇 최다 이용 역", top_station['역명'], f"{top_station['총이용']:,.0f}명")
+        
+        residence_count = len(map_data[map_data['특성'] == '주거지역'])
+        col2.metric("🏠 주거지역 특성", f"{residence_count}개역")
+        
+        business_count = len(map_data[map_data['특성'] == '업무지역'])
+        col3.metric("🏢 업무지역 특성", f"{business_count}개역")
+
+# Tab 7: 히트맵
+with tab7:
+    st.subheader("📈 시간대별 역 이용 히트맵")
+    
     metric_type = st.radio("분석 지표", ['승차', '하차'], horizontal=True)
     
-    # 역별 통계로 정렬
     heatmap_stats = []
     for idx, row in filtered_df.iterrows():
         total = sum(row[f'{time}_{metric_type}'] for time in time_slots)
@@ -602,11 +823,9 @@ with tab6:
     
     heatmap_stats_df = pd.DataFrame(heatmap_stats).sort_values('총량', ascending=False)
     
-    # 상위 30개 역만 표시
     top_30_indices = heatmap_stats_df.head(30)['index'].tolist()
     heatmap_df = filtered_df.loc[top_30_indices]
     
-    # 히트맵 데이터 구성
     heatmap_data = []
     station_labels = []
     
@@ -623,7 +842,6 @@ with tab6:
         station_data = [row[f'{time}_{metric_type}'] for time in time_slots]
         heatmap_data.append(station_data)
     
-    # 히트맵 생성
     fig = go.Figure(data=go.Heatmap(
         z=heatmap_data,
         x=time_slots,
@@ -648,4 +866,4 @@ with tab6:
 # 푸터
 st.markdown("---")
 st.markdown("**데이터 출처**: 서울 지하철 승하차 데이터 (2025년 8월) | **분석 기간**: 월간 집계")
-st.caption("💡 이 대시보드는 시간대별 승하차 패턴을 분석하여 지하철 이용 트렌드와 역별 특성을 파악합니다. 환승역은 별도로 분석 가능합니다.")
+st.caption("💡 이 대시보드는 시간대별 승하차 패턴을 분석하여 지하철 이용 트렌드와 역별 특성을 파악합니다. 지도 시각화로 공간적 패턴도 확인 가능합니다.")
