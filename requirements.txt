@@ -4,3 +4,4 @@ plotly
 scikit-learn
 Pillow
 folium
+streamlit_folium
