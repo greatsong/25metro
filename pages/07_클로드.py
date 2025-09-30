@@ -40,32 +40,94 @@ def load_data():
     
     return df, time_slots
 
+# 환승역 데이터 생성 함수
+@st.cache_data
+def create_merged_station_data(df, time_slots):
+    """같은 역명의 여러 호선을 합산한 데이터 생성"""
+    merged_data = []
+    
+    for station in df['지하철역'].unique():
+        station_rows = df[df['지하철역'] == station]
+        lines = station_rows['호선명'].tolist()
+        
+        merged_row = {
+            '지하철역': station,
+            '호선': ', '.join(lines) if len(lines) > 1 else lines[0],
+            '호선수': len(lines),
+            '환승역여부': '환승역' if len(lines) > 1 else '일반역'
+        }
+        
+        # 시간대별 데이터 합산
+        for time in time_slots:
+            merged_row[f'{time}_승차'] = station_rows[f'{time}_승차'].sum()
+            merged_row[f'{time}_하차'] = station_rows[f'{time}_하차'].sum()
+        
+        merged_data.append(merged_row)
+    
+    return pd.DataFrame(merged_data)
+
 # 데이터 로드
 df, time_slots = load_data()
+merged_df = create_merged_station_data(df, time_slots)
 
 # 사이드바 필터
 st.sidebar.header("🔍 필터 옵션")
 
-# 호선 선택
-lines = sorted(df['호선명'].unique())
-selected_line = st.sidebar.selectbox("호선 선택", ['전체'] + lines)
+# 데이터 모드 선택
+data_mode = st.sidebar.radio(
+    "데이터 표시 방식",
+    ["호선별 개별", "역명 통합 (환승역 합산)"],
+    help="환승역의 여러 호선을 합쳐서 볼지, 개별로 볼지 선택"
+)
 
-# 필터링된 데이터
-if selected_line == '전체':
-    filtered_df = df.copy()
+# 호선 선택 (호선별 개별 모드일 때만)
+if data_mode == "호선별 개별":
+    lines = sorted(df['호선명'].unique())
+    selected_line = st.sidebar.selectbox("호선 선택", ['전체'] + lines)
+    
+    if selected_line == '전체':
+        filtered_df = df.copy()
+    else:
+        filtered_df = df[df['호선명'] == selected_line].copy()
+    
+    # 역 선택
+    stations = sorted(filtered_df['지하철역'].unique())
+    selected_station = st.sidebar.selectbox("역 선택 (상세 분석용)", ['전체'] + stations)
+    
+    # 선택된 역이 환승역인지 확인
+    if selected_station != '전체':
+        station_lines = filtered_df[filtered_df['지하철역'] == selected_station]['호선명'].unique()
+        if len(station_lines) > 0:
+            selected_station_line = st.sidebar.selectbox(
+                "호선 선택 (해당 역)",
+                station_lines.tolist()
+            )
 else:
-    filtered_df = df[df['호선명'] == selected_line].copy()
-
-# 역 선택
-stations = sorted(filtered_df['지하철역'].unique())
-selected_station = st.sidebar.selectbox("역 선택 (상세 분석용)", ['전체'] + stations)
+    # 역명 통합 모드
+    filtered_df = merged_df.copy()
+    
+    # 환승역 필터
+    transfer_filter = st.sidebar.selectbox(
+        "역 유형",
+        ['전체', '환승역만', '일반역만']
+    )
+    
+    if transfer_filter == '환승역만':
+        filtered_df = filtered_df[filtered_df['환승역여부'] == '환승역']
+    elif transfer_filter == '일반역만':
+        filtered_df = filtered_df[filtered_df['환승역여부'] == '일반역']
+    
+    # 역 선택
+    stations = sorted(filtered_df['지하철역'].unique())
+    selected_station = st.sidebar.selectbox("역 선택 (상세 분석용)", ['전체'] + stations)
 
 # 메인 대시보드
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 전체 현황", 
     "⏰ 시간대별 분석", 
     "🏆 역별 순위", 
-    "🔄 승하차 불균형", 
+    "🔄 승하차 불균형",
+    "🔀 환승역 분석",
     "🗺️ 히트맵"
 ])
 
@@ -86,12 +148,16 @@ with tab1:
     col3.metric("일평균 이용자", f"{daily_avg:,.0f}명")
     
     # 역 수
-    col4.metric("분석 역 수", f"{len(filtered_df)}개역")
+    if data_mode == "역명 통합 (환승역 합산)":
+        transfer_count = len(filtered_df[filtered_df['환승역여부'] == '환승역'])
+        col4.metric("분석 역 수", f"{len(filtered_df)}개역", f"환승역 {transfer_count}개")
+    else:
+        col4.metric("분석 역 수", f"{len(filtered_df)}개역")
     
     st.markdown("---")
     
     # 호선별 이용 현황
-    if selected_line == '전체':
+    if data_mode == "호선별 개별" and selected_line == '전체':
         st.subheader("📈 호선별 이용 현황")
         
         line_stats = []
@@ -125,25 +191,84 @@ with tab1:
                         color_discrete_sequence=px.colors.qualitative.Bold)
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
+    
+    elif data_mode == "역명 통합 (환승역 합산)":
+        st.subheader("📈 환승역 vs 일반역 비교")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            transfer_total = filtered_df[filtered_df['환승역여부'] == '환승역'][[f'{time}_승차' for time in time_slots]].sum().sum() + \
+                           filtered_df[filtered_df['환승역여부'] == '환승역'][[f'{time}_하차' for time in time_slots]].sum().sum()
+            normal_total = filtered_df[filtered_df['환승역여부'] == '일반역'][[f'{time}_승차' for time in time_slots]].sum().sum() + \
+                         filtered_df[filtered_df['환승역여부'] == '일반역'][[f'{time}_하차' for time in time_slots]].sum().sum()
+            
+            comparison_df = pd.DataFrame({
+                '구분': ['환승역', '일반역'],
+                '이용객': [transfer_total, normal_total]
+            })
+            
+            fig = px.pie(comparison_df, values='이용객', names='구분',
+                        title='환승역 vs 일반역 이용 비율',
+                        color_discrete_map={'환승역': '#FF6B6B', '일반역': '#4ECDC4'})
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            transfer_count = len(merged_df[merged_df['환승역여부'] == '환승역'])
+            normal_count = len(merged_df[merged_df['환승역여부'] == '일반역'])
+            
+            count_df = pd.DataFrame({
+                '구분': ['환승역', '일반역'],
+                '개수': [transfer_count, normal_count]
+            })
+            
+            fig = px.bar(count_df, x='구분', y='개수',
+                        title='환승역 vs 일반역 개수',
+                        color='구분',
+                        color_discrete_map={'환승역': '#FF6B6B', '일반역': '#4ECDC4'})
+            fig.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
 
 # Tab 2: 시간대별 분석
 with tab2:
     st.subheader("⏰ 시간대별 승하차 패턴")
     
     if selected_station != '전체':
-        # 특정 역의 시간대별 패턴
-        station_df = filtered_df[filtered_df['지하철역'] == selected_station].iloc[0]
-        
-        hourly_data = []
-        for time in time_slots:
-            hourly_data.append({
-                '시간대': time,
-                '승차': station_df[f'{time}_승차'],
-                '하차': station_df[f'{time}_하차']
-            })
-        hourly_df = pd.DataFrame(hourly_data)
-        
-        st.markdown(f"### 📍 {selected_station}역 시간대별 패턴")
+        if data_mode == "호선별 개별":
+            # 특정 역의 특정 호선 시간대별 패턴
+            station_df = filtered_df[
+                (filtered_df['지하철역'] == selected_station) & 
+                (filtered_df['호선명'] == selected_station_line)
+            ].iloc[0]
+            
+            hourly_data = []
+            for time in time_slots:
+                hourly_data.append({
+                    '시간대': time,
+                    '승차': station_df[f'{time}_승차'],
+                    '하차': station_df[f'{time}_하차']
+                })
+            hourly_df = pd.DataFrame(hourly_data)
+            
+            st.markdown(f"### 📍 {selected_station}역 ({selected_station_line}) 시간대별 패턴")
+        else:
+            # 역명 통합 모드
+            station_df = filtered_df[filtered_df['지하철역'] == selected_station].iloc[0]
+            
+            hourly_data = []
+            for time in time_slots:
+                hourly_data.append({
+                    '시간대': time,
+                    '승차': station_df[f'{time}_승차'],
+                    '하차': station_df[f'{time}_하차']
+                })
+            hourly_df = pd.DataFrame(hourly_data)
+            
+            if station_df['환승역여부'] == '환승역':
+                st.markdown(f"### 📍 {selected_station}역 시간대별 패턴 (환승역: {station_df['호선']})")
+            else:
+                st.markdown(f"### 📍 {selected_station}역 ({station_df['호선']}) 시간대별 패턴")
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=hourly_df['시간대'], y=hourly_df['승차'],
@@ -237,13 +362,21 @@ with tab3:
     for idx, row in filtered_df.iterrows():
         total_board = sum(row[f'{time}_승차'] for time in time_slots)
         total_alight = sum(row[f'{time}_하차'] for time in time_slots)
-        station_stats.append({
-            '호선': row['호선명'],
+        
+        stat_row = {
             '역명': row['지하철역'],
             '승차': total_board,
             '하차': total_alight,
             '총 이용': total_board + total_alight
-        })
+        }
+        
+        if data_mode == "호선별 개별":
+            stat_row['호선'] = row['호선명']
+        else:
+            stat_row['호선'] = row['호선']
+            stat_row['환승역여부'] = row['환승역여부']
+        
+        station_stats.append(stat_row)
     
     station_stats_df = pd.DataFrame(station_stats).sort_values('총 이용', ascending=False)
     
@@ -265,7 +398,8 @@ with tab3:
                     title=f'{rank_type} 역',
                     labels={'총 이용': '총 이용자 수', '역명': ''},
                     color='총 이용',
-                    color_continuous_scale=color_scale)
+                    color_continuous_scale=color_scale,
+                    hover_data=['호선'])
         fig.update_layout(height=600, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
     
@@ -275,7 +409,11 @@ with tab3:
         display_detail['승차'] = display_detail['승차'].apply(lambda x: f"{x:,.0f}")
         display_detail['하차'] = display_detail['하차'].apply(lambda x: f"{x:,.0f}")
         display_detail['총 이용'] = display_detail['총 이용'].apply(lambda x: f"{x:,.0f}")
-        st.dataframe(display_detail[['역명', '호선', '총 이용']], height=600)
+        
+        if data_mode == "역명 통합 (환승역 합산)":
+            st.dataframe(display_detail[['역명', '호선', '환승역여부', '총 이용']], height=600)
+        else:
+            st.dataframe(display_detail[['역명', '호선', '총 이용']], height=600)
 
 # Tab 4: 승하차 불균형
 with tab4:
@@ -293,15 +431,22 @@ with tab4:
             board_ratio = (total_board / total) * 100
             imbalance = abs(total_board - total_alight)
             
-            imbalance_stats.append({
-                '호선': row['호선명'],
+            stat_row = {
                 '역명': row['지하철역'],
                 '승차': total_board,
                 '하차': total_alight,
                 '승차비율': board_ratio,
                 '불균형도': imbalance,
                 '특성': '주거지역' if board_ratio > 55 else ('업무지역' if board_ratio < 45 else '균형')
-            })
+            }
+            
+            if data_mode == "호선별 개별":
+                stat_row['호선'] = row['호선명']
+            else:
+                stat_row['호선'] = row['호선']
+                stat_row['환승역여부'] = row['환승역여부']
+            
+            imbalance_stats.append(stat_row)
     
     imbalance_df = pd.DataFrame(imbalance_stats)
     
@@ -348,51 +493,159 @@ with tab4:
         business_top = imbalance_df[imbalance_df['특성'] == '업무지역'].nsmallest(10, '승차비율')
         st.dataframe(business_top[['역명', '호선', '승차비율']].style.format({'승차비율': '{:.1f}%'}))
 
-# Tab 5: 히트맵
+# Tab 5: 환승역 분석 (새로운 탭)
 with tab5:
+    st.subheader("🔀 환승역 심층 분석")
+    
+    # 환승역 통계
+    transfer_stations = merged_df[merged_df['환승역여부'] == '환승역'].copy()
+    
+    # 환승역별 총 이용객 계산
+    transfer_stats = []
+    for idx, row in transfer_stations.iterrows():
+        total_board = sum(row[f'{time}_승차'] for time in time_slots)
+        total_alight = sum(row[f'{time}_하차'] for time in time_slots)
+        transfer_stats.append({
+            '역명': row['지하철역'],
+            '호선': row['호선'],
+            '호선수': row['호선수'],
+            '총 이용': total_board + total_alight
+        })
+    
+    transfer_stats_df = pd.DataFrame(transfer_stats).sort_values('총 이용', ascending=False)
+    
+    # 상단 메트릭
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_transfer = len(transfer_stations)
+    col1.metric("총 환승역 수", f"{total_transfer}개역")
+    
+    max_lines = transfer_stations['호선수'].max()
+    col2.metric("최대 호선 수", f"{int(max_lines)}개 호선")
+    
+    transfer_total_users = transfer_stats_df['총 이용'].sum()
+    all_total_users = sum(merged_df[f'{time}_승차'].sum() + merged_df[f'{time}_하차'].sum() for time in time_slots)
+    transfer_ratio = (transfer_total_users / all_total_users) * 100
+    col3.metric("환승역 이용 비중", f"{transfer_ratio:.1f}%")
+    
+    avg_transfer_users = transfer_total_users / total_transfer
+    col4.metric("환승역 평균 이용", f"{avg_transfer_users:,.0f}명")
+    
+    st.markdown("---")
+    
+    # 환승역 Top 20
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("### 🏆 환승역 이용 순위 Top 20")
+        top20_transfer = transfer_stats_df.head(20)
+        
+        fig = px.bar(top20_transfer, y='역명', x='총 이용',
+                    orientation='h',
+                    title='환승역 이용객 순위',
+                    labels={'총 이용': '총 이용자 수', '역명': ''},
+                    color='호선수',
+                    color_continuous_scale='Viridis',
+                    hover_data=['호선'])
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("### 📊 호선 수별 분포")
+        
+        line_count_dist = transfer_stations['호선수'].value_counts().sort_index()
+        
+        fig = px.bar(x=line_count_dist.index, y=line_count_dist.values,
+                    labels={'x': '호선 수', 'y': '역 개수'},
+                    title='환승 호선 수 분포',
+                    color=line_count_dist.values,
+                    color_continuous_scale='Blues')
+        fig.update_layout(height=300, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("### 📋 상세 정보")
+        display_detail = top20_transfer.copy()
+        display_detail['총 이용'] = display_detail['총 이용'].apply(lambda x: f"{x:,.0f}")
+        st.dataframe(display_detail[['역명', '호선수', '호선', '총 이용']], height=300)
+    
+    # 호선별 환승역 네트워크
+    st.markdown("### 🗺️ 환승 가능 호선 조합")
+    
+    # 호선 조합 빈도 분석
+    line_combinations = transfer_stations['호선'].value_counts().head(15)
+    
+    fig = px.bar(x=line_combinations.values, y=line_combinations.index,
+                orientation='h',
+                title='주요 환승 호선 조합 (Top 15)',
+                labels={'x': '역 개수', 'y': '호선 조합'},
+                color=line_combinations.values,
+                color_continuous_scale='Plasma')
+    fig.update_layout(height=500, showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+# Tab 6: 히트맵
+with tab6:
     st.subheader("🗺️ 시간대별 역 이용 히트맵")
     
     # 승차/하차 선택
     metric_type = st.radio("분석 지표", ['승차', '하차'], horizontal=True)
     
+    # 역별 통계로 정렬
+    heatmap_stats = []
+    for idx, row in filtered_df.iterrows():
+        total = sum(row[f'{time}_{metric_type}'] for time in time_slots)
+        heatmap_stats.append({
+            'index': idx,
+            '역명': row['지하철역'],
+            '총량': total
+        })
+    
+    heatmap_stats_df = pd.DataFrame(heatmap_stats).sort_values('총량', ascending=False)
+    
     # 상위 30개 역만 표시
-    top_stations = station_stats_df.head(30)['역명'].tolist()
-    heatmap_df = filtered_df[filtered_df['지하철역'].isin(top_stations)]
+    top_30_indices = heatmap_stats_df.head(30)['index'].tolist()
+    heatmap_df = filtered_df.loc[top_30_indices]
     
     # 히트맵 데이터 구성
     heatmap_data = []
-    for _, row in heatmap_df.iterrows():
-        station_data = [row['지하철역']]
-        for time in time_slots:
-            station_data.append(row[f'{time}_{metric_type}'])
-        heatmap_data.append(station_data)
+    station_labels = []
     
-    heatmap_matrix_df = pd.DataFrame(heatmap_data, columns=['역명'] + time_slots)
-    heatmap_matrix_df = heatmap_matrix_df.set_index('역명')
+    for idx, row in heatmap_df.iterrows():
+        if data_mode == "호선별 개별":
+            station_label = f"{row['지하철역']} ({row['호선명']})"
+        else:
+            if row['환승역여부'] == '환승역':
+                station_label = f"{row['지하철역']} ⚡"
+            else:
+                station_label = row['지하철역']
+        
+        station_labels.append(station_label)
+        station_data = [row[f'{time}_{metric_type}'] for time in time_slots]
+        heatmap_data.append(station_data)
     
     # 히트맵 생성
     fig = go.Figure(data=go.Heatmap(
-        z=heatmap_matrix_df.values,
+        z=heatmap_data,
         x=time_slots,
-        y=heatmap_matrix_df.index,
+        y=station_labels,
         colorscale='YlOrRd' if metric_type == '승차' else 'Blues',
         hoverongaps=False,
         hovertemplate='역: %{y}<br>시간: %{x}<br>인원: %{z:,.0f}명<extra></extra>'
     ))
     
     fig.update_layout(
-        title=f'상위 30개역 시간대별 {metric_type} 패턴',
+        title=f'상위 30개역 시간대별 {metric_type} 패턴 (⚡ = 환승역)',
         xaxis_title='시간대',
         yaxis_title='역명',
-        height=800
+        height=900
     )
     
     st.plotly_chart(fig, use_container_width=True)
     
     st.info("💡 **인사이트**: 색이 진할수록 해당 시간대에 이용이 많은 것을 의미합니다. "
-           "출근/퇴근 시간대의 패턴을 한눈에 확인할 수 있습니다.")
+           "출근/퇴근 시간대의 패턴을 한눈에 확인할 수 있습니다. ⚡ 표시는 환승역을 나타냅니다.")
 
 # 푸터
 st.markdown("---")
 st.markdown("**데이터 출처**: 서울 지하철 승하차 데이터 (2025년 8월) | **분석 기간**: 월간 집계")
-st.caption("💡 이 대시보드는 시간대별 승하차 패턴을 분석하여 지하철 이용 트렌드와 역별 특성을 파악합니다.")
+st.caption("💡 이 대시보드는 시간대별 승하차 패턴을 분석하여 지하철 이용 트렌드와 역별 특성을 파악합니다. 환승역은 별도로 분석 가능합니다.")
