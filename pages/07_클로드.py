@@ -7,6 +7,7 @@ import numpy as np
 import folium
 from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
+import re
 
 # 페이지 설정
 st.set_page_config(page_title="서울 지하철 승하차 분석", layout="wide", page_icon="🚇")
@@ -45,26 +46,41 @@ def load_data():
 
 @st.cache_data
 def load_coordinates():
-    """역 좌표 데이터 로드"""
-    try:
-        # EUC-KR 인코딩으로 시도
-        coord_df = pd.read_csv('서울시 역사마스터 정보.csv', encoding='euc-kr')
-        
-        # 컬럼명이 한글로 제대로 읽혔는지 확인하고 표준화
-        coord_df.columns = ['역사_ID', '역사명', '호선', '위도', '경도']
-        
-        return coord_df
-    except:
+    """역 좌표 데이터 로드 - 여러 인코딩 자동 감지"""
+    encodings = ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig', 'latin1']
+    
+    for enc in encodings:
         try:
-            # CP949로 시도
-            coord_df = pd.read_csv('서울시 역사마스터 정보.csv', encoding='cp949')
-            coord_df.columns = ['역사_ID', '역사명', '호선', '위도', '경도']
-            return coord_df
-        except:
-            # UTF-8로 시도
-            coord_df = pd.read_csv('서울시 역사마스터 정보.csv', encoding='utf-8')
-            coord_df.columns = ['역사_ID', '역사명', '호선', '위도', '경도']
-            return coord_df
+            coord_df = pd.read_csv('서울시 역사마스터 정보.csv', encoding=enc)
+            
+            # 컬럼명이 정상적으로 읽혔는지 확인
+            if len(coord_df.columns) >= 5:
+                # 컬럼명 표준화
+                coord_df.columns = ['역사_ID', '역사명', '호선', '위도', '경도']
+                
+                # 첫 번째 행의 역사명이 한글인지 확인
+                if not coord_df.empty and isinstance(coord_df.iloc[0]['역사명'], str):
+                    test_name = coord_df.iloc[0]['역사명']
+                    # 한글이 포함되어 있으면 성공
+                    if any('\uac00' <= c <= '\ud7a3' for c in test_name):
+                        # 역사명 정규화
+                        coord_df['역사명_원본'] = coord_df['역사명']
+                        coord_df['역사명'] = coord_df['역사명'].str.strip()
+                        
+                        # 위도, 경도가 유효한 행만 유지
+                        coord_df = coord_df.dropna(subset=['위도', '경도'])
+                        
+                        # 중복 제거 (같은 역명이 여러 번 나오면 첫 번째만 사용)
+                        coord_df = coord_df.drop_duplicates(subset=['역사명'], keep='first')
+                        
+                        st.session_state['coord_encoding'] = enc
+                        return coord_df
+        except Exception as e:
+            continue
+    
+    # 모든 인코딩 실패 시 빈 데이터프레임
+    st.session_state['coord_encoding'] = 'failed'
+    return pd.DataFrame(columns=['역사_ID', '역사명', '호선', '위도', '경도', '역사명_원본'])
 
 # 환승역 데이터 생성 함수
 @st.cache_data
@@ -92,23 +108,80 @@ def create_merged_station_data(df, time_slots):
     
     return pd.DataFrame(merged_data)
 
+def normalize_station_name(name):
+    """역명 정규화"""
+    if pd.isna(name):
+        return ""
+    
+    name = str(name).strip()
+    # 괄호와 그 안의 내용 제거 (예: "서울역(1,4호선)" -> "서울역")
+    name = re.sub(r'\([^)]*\)', '', name)
+    name = name.strip()
+    
+    # "역" 제거
+    if name.endswith('역'):
+        name = name[:-1]
+    
+    # 공백 제거
+    name = name.replace(' ', '')
+    
+    return name
+
 @st.cache_data
 def merge_with_coordinates(station_df, coord_df, time_slots):
-    """역 이용 데이터와 좌표 데이터 병합"""
-    # 좌표 데이터의 역명 정리
-    coord_df['역사명_clean'] = coord_df['역사명'].str.strip()
+    """역 이용 데이터와 좌표 데이터 병합 - 강력한 매칭"""
+    if coord_df.empty:
+        return pd.DataFrame()
     
-    # 역별 총 이용객 계산
+    # 좌표 데이터의 역명 정규화
+    coord_df = coord_df.copy()
+    coord_df['역사명_정규화'] = coord_df['역사명'].apply(normalize_station_name)
+    
+    # 빠른 조회를 위한 딕셔너리 생성
+    coord_dict_exact = {}
+    coord_dict_normalized = {}
+    
+    for idx, row in coord_df.iterrows():
+        station_name = row['역사명']
+        station_normalized = row['역사명_정규화']
+        
+        coord_dict_exact[station_name] = row
+        coord_dict_normalized[station_normalized] = row
+    
+    # 역별 총 이용객 계산 및 매칭
     result_data = []
+    matched_count = 0
+    not_matched = []
+    matching_details = []
+    
     for idx, row in station_df.iterrows():
         station_name = row['지하철역']
+        station_name_normalized = normalize_station_name(station_name)
         
-        # 좌표 찾기 (역명으로 매칭)
-        coord_match = coord_df[coord_df['역사명_clean'] == station_name]
+        coord = None
+        match_type = None
         
-        if not coord_match.empty:
-            # 여러 개가 매칭되면 첫 번째 사용
-            coord = coord_match.iloc[0]
+        # 1차: 정확한 이름 매칭
+        if station_name in coord_dict_exact:
+            coord = coord_dict_exact[station_name]
+            match_type = "정확매칭"
+        
+        # 2차: 정규화된 이름 매칭
+        elif station_name_normalized in coord_dict_normalized:
+            coord = coord_dict_normalized[station_name_normalized]
+            match_type = "정규화매칭"
+        
+        # 3차: 부분 문자열 매칭 (긴 이름 우선)
+        elif len(station_name_normalized) >= 2:
+            for coord_normalized, coord_row in coord_dict_normalized.items():
+                if (coord_normalized and station_name_normalized in coord_normalized) or \
+                   (coord_normalized and coord_normalized in station_name_normalized):
+                    coord = coord_row
+                    match_type = "부분매칭"
+                    break
+        
+        if coord is not None:
+            matched_count += 1
             
             total_board = sum(row[f'{time}_승차'] for time in time_slots)
             total_alight = sum(row[f'{time}_하차'] for time in time_slots)
@@ -128,8 +201,27 @@ def merge_with_coordinates(station_df, coord_df, time_slots):
                 '특성': '주거지역' if board_ratio > 55 else ('업무지역' if board_ratio < 45 else '균형'),
                 '환승역여부': row.get('환승역여부', '일반역')
             })
+            
+            matching_details.append({
+                '역명': station_name,
+                '매칭방식': match_type,
+                '좌표역명': coord['역사명']
+            })
+        else:
+            not_matched.append(station_name)
     
-    return pd.DataFrame(result_data)
+    result_df = pd.DataFrame(result_data)
+    
+    # 매칭 통계 저장
+    st.session_state.matching_stats = {
+        'matched': matched_count,
+        'total': len(station_df),
+        'not_matched': not_matched,
+        'match_rate': (matched_count / len(station_df) * 100) if len(station_df) > 0 else 0,
+        'details': matching_details[:20]  # 처음 20개만
+    }
+    
+    return result_df
 
 # 데이터 로드
 df, time_slots = load_data()
@@ -636,11 +728,52 @@ with tab5:
 with tab6:
     st.subheader("🗺️ 서울 지하철 지도 시각화")
     
+    # 인코딩 정보 표시
+    if 'coord_encoding' in st.session_state:
+        if st.session_state['coord_encoding'] == 'failed':
+            st.error("⚠️ 역사마스터 파일을 읽을 수 없습니다. 파일 인코딩을 확인해주세요.")
+        else:
+            st.success(f"✅ 역사마스터 파일 로드 완료 (인코딩: {st.session_state['coord_encoding']})")
+    
     # 좌표와 병합
     map_data = merge_with_coordinates(filtered_df, coord_df, time_slots)
     
+    # 매칭 통계 표시
+    if 'matching_stats' in st.session_state:
+        stats = st.session_state.matching_stats
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("📍 매칭 성공", f"{stats['matched']}개", f"{stats['match_rate']:.1f}%")
+        col2.metric("📊 전체 역", f"{stats['total']}개")
+        col3.metric("❌ 미매칭", f"{len(stats['not_matched'])}개")
+        
+        if stats['match_rate'] >= 90:
+            col4.success("🎉 우수!")
+        elif stats['match_rate'] >= 70:
+            col4.warning("⚠️ 보통")
+        else:
+            col4.error("❌ 낮음")
+        
+        # 매칭 상세 정보
+        if stats['not_matched']:
+            with st.expander(f"⚠️ 매칭되지 않은 역 목록 ({len(stats['not_matched'])}개)"):
+                not_matched_text = ", ".join(stats['not_matched'][:30])
+                if len(stats['not_matched']) > 30:
+                    not_matched_text += f"... 외 {len(stats['not_matched']) - 30}개"
+                st.write(not_matched_text)
+                st.caption("💡 이 역들은 지도에 표시되지 않습니다. 역사마스터 파일에 해당 역명이 없거나 표기가 다를 수 있습니다.")
+        
+        # 매칭 방식 상세 (처음 20개)
+        if 'details' in stats and stats['details']:
+            with st.expander("🔍 매칭 방식 상세 (샘플 20개)"):
+                details_df = pd.DataFrame(stats['details'])
+                st.dataframe(details_df, use_container_width=True)
+    
     if len(map_data) == 0:
-        st.warning("⚠️ 좌표 데이터와 매칭되는 역이 없습니다. 역명이 정확히 일치하는지 확인해주세요.")
+        st.warning("⚠️ 좌표 데이터와 매칭되는 역이 없습니다. 다음을 확인해주세요:\n"
+                  "1. 서울시 역사마스터 정보.csv 파일이 올바르게 업로드되었는지\n"
+                  "2. 파일의 인코딩이 올바른지 (cp949, euc-kr, utf-8 자동 시도)\n"
+                  "3. 역명 표기가 일치하는지")
     else:
         st.success(f"✅ 총 {len(map_data)}개 역의 위치 정보를 찾았습니다!")
         
